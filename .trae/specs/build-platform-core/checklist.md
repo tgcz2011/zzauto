@@ -1,0 +1,31 @@
+# Checklist
+
+- [x] Go 项目骨架与 CLI 入口可运行（`zzauto serve` 启动本地服务）
+- [x] workspace 目录结构与文档协议定义清晰（projects/<id>/{desire,need,spec,deal,task}.md, agents/<name>/）
+- [x] 文档 frontmatter 状态字段定义（stage/status/updated_at）
+- [x] aiclibridge 客户端可成功调用 /v1/chat/completions
+- [x] aiclibridge 不可达时给出明确安装提示（curl | sh）
+- [x] Agent 接口与编排器状态机实现（9 角色顺序流转）
+- [x] 事件总线可推送 agent 状态变更
+- [x] Listener 能将用户需求写入 desire.md（含改进点）
+- [x] Asker 能多轮提问并将结果分点写入 need.md
+- [x] Asker 挑剔模式：未满足时持续提问，满足后才进入下一步
+- [x] Planner 能根据 need.md 生成标准 spec.md
+- [x] Designer + Evaluator 多轮批判讨论后输出 deal.md
+- [x] Manager 能生成可勾选的 task.md（每项 id + 验收点）
+- [x] Executor 能为 Generator 创建隔离工作目录（仅含指令，无其他文档）
+- [x] Generator 仅读指令写代码 + report，无法访问其他文档
+- [x] 系统能向 Generator 提问"你觉得合格了吗？"并获取确认
+- [x] Evaluator 能对照 deal.md/spec.md/task.md/report 评估
+- [x] 评估合格时在 spec.md 打勾并转交 Gittor
+- [x] 评估不合格时反馈 Executor 重新分配（回到 Generator）
+- [x] Gittor 用 git CLI 完成 commit/push（conventional commits）
+- [x] Gittor 不污染其他 agent 上下文（其他 agent 不直接调 git，仅 IPC 请求）
+- [x] upgrade 走 GitHub releases 直链（不调 gh api）
+- [x] Web UI 展示流程状态、agent 输出、Asker 问答、GitHub 配置
+- [x] Web UI 静态资源 embed 进 Go 二进制（单文件部署）
+- [x] curl | sh 安装脚本支持 macOS/Linux（探测架构、sha256 校验、装 PATH）
+- [x] PowerShell 安装脚本支持 Windows
+- [x] uninstall 命令正确移除二进制与配置（保留项目数据）
+- [x] upgrade 命令正确升级（GitHub releases 直链、sha256 校验）
+- [x] 端到端冒烟测试：简单需求跑通全流程并提交到测试仓库

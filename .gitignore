@@ -1,0 +1,13 @@
+# 二进制
+/zzauto
+/zzauto.exe
+
+# 工作区数据
+/workspace/
+
+# 日志
+*.log
+
+# macOS
+.DS_Store
+.DS_Store?
