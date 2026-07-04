@@ -14,12 +14,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/tgcz2011/zzauto/internal/aicli"
 )
 
 // 仓库坐标与下载基地址。
@@ -36,6 +39,10 @@ var releasesLatestURL = releasesURL + "/latest"
 
 // CurrentVersion 当前二进制版本号，由 main 包覆写。
 var CurrentVersion = "v0.1.0"
+
+// upgradeAiclibridgeFunc 同步升级 aiclibridge 的函数指针。
+// 默认调用 aicli.UpgradeAiclibridge；测试可替换为 mock。
+var upgradeAiclibridgeFunc func() error = aicli.UpgradeAiclibridge
 
 // ErrUnsupportedPlatform 表示当前平台无对应预编译产物。
 type ErrUnsupportedPlatform struct{ goos, goarch string }
@@ -408,6 +415,10 @@ func Upgrade() error {
 
 	if latest == fromVersion {
 		fmt.Println("已是最新版本，无需升级。")
+		// 同步升级 aiclibridge（失败不致命，仅警告）
+		if err := upgradeAiclibridgeFunc(); err != nil {
+			log.Printf("警告: aiclibridge 同步升级失败: %v", err)
+		}
 		return nil
 	}
 
@@ -489,6 +500,10 @@ func Upgrade() error {
 	os.Remove(backup)
 
 	fmt.Printf("升级完成: %s -> %s\n", fromVersion, latest)
+	// 同步升级 aiclibridge（失败不致命，仅警告）
+	if err := upgradeAiclibridgeFunc(); err != nil {
+		log.Printf("警告: aiclibridge 同步升级失败: %v", err)
+	}
 	return nil
 }
 

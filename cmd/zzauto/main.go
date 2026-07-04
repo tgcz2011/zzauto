@@ -23,7 +23,7 @@ import (
 )
 
 // Version zzauto 版本号。
-const Version = "v0.1.0"
+const Version = "v0.2.0"
 
 func main() {
 	log.SetFlags(0)
@@ -59,7 +59,7 @@ func usage() {
   zzauto [command]
 
 命令:
-  serve       启动 HTTP 服务与编排器（默认）
+  serve       启动 HTTP 服务与编排器（默认，--no-auto-install 禁用自动安装）
   uninstall   移除二进制与配置（保留项目数据）
   upgrade     从 GitHub releases 升级
   version     打印版本号
@@ -96,6 +96,7 @@ func runUpgrade(args []string) {
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	listen := fs.String("listen", "", "监听地址（覆盖配置）")
+	noAutoInstall := fs.Bool("no-auto-install", false, "aiclibridge 不可达时不自动安装，仅提示并退出")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -115,17 +116,32 @@ func runServe(args []string) {
 		log.Fatalf("创建工作区目录失败: %v", err)
 	}
 
-	// 检查 aiclibridge 可达性
+	// 检查 aiclibridge 可达性，不可达时按需自动安装
 	aiClient := aicli.New(cfg.AicliAddr, cfg.AicliKey)
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := aiClient.Health(healthCtx); err != nil {
 		healthCancel()
 		log.Printf("aiclibridge 不可达: %v", err)
-		fmt.Fprintln(os.Stderr, "请先安装并启动 aiclibridge：")
-		fmt.Fprintln(os.Stderr, "  curl -fsSL https://github.com/tgcz2011/aiclibridge/raw/main/scripts/install.sh | sh")
-		os.Exit(1)
+		if *noAutoInstall {
+			fmt.Fprintln(os.Stderr, "请先安装并启动 aiclibridge：")
+			fmt.Fprintln(os.Stderr, "  curl -fsSL https://github.com/tgcz2011/aiclibridge/raw/main/scripts/install.sh | sh")
+			os.Exit(1)
+		}
+		// 自动安装
+		log.Println("正在自动安装 aiclibridge...")
+		installCtx, installCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		if err := aicli.EnsureInstalled(installCtx, cfg.AicliAddr, cfg.AicliKey); err != nil {
+			installCancel()
+			fmt.Fprintf(os.Stderr, "aiclibridge 自动安装失败: %v\n", err)
+			fmt.Fprintln(os.Stderr, "请手动安装：")
+			fmt.Fprintln(os.Stderr, "  curl -fsSL https://github.com/tgcz2011/aiclibridge/raw/main/scripts/install.sh | sh")
+			os.Exit(1)
+		}
+		installCancel()
+		log.Println("aiclibridge 安装完成，继续启动")
+	} else {
+		healthCancel()
 	}
-	healthCancel()
 
 	// 创建 UI handler，适配 AskUser 为 agents.AskFunc 签名
 	handler := ui.New(bus, ws, cfg)

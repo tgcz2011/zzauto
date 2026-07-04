@@ -1,0 +1,33 @@
+# Checklist
+
+- [x] internal/aicli/bootstrap.go 实现 EnsureInstalled（自动安装+健康轮询）
+- [x] internal/aicli/bootstrap.go 实现 UpgradeAiclibridge（调 aiclibridge upgrade CLI）
+- [x] bootstrap_test.go 覆盖 EnsureInstalled 与 UpgradeAiclibridge（mock，不联网）
+- [x] installer.Upgrade 末尾同步调用 aiclibridge upgrade，失败仅警告
+- [x] main.go runServe 支持 --no-auto-install flag
+- [x] runServe aiclibridge 不可达时自动安装（curl|sh / irm|iex）
+- [x] 自动安装后重新健康检查，通过则继续 serve
+- [x] 自动安装失败时打印原因与手动命令，退出 1
+- [x] --no-auto-install 时保持原有行为（提示+退出）
+- [x] README.md 含项目介绍、特性、架构图、9 agent 流程图
+- [x] README.md 含快速开始（安装+配置+启动+提交需求）
+- [x] README.md 含命令参考、配置说明、文档索引
+- [x] docs/quickstart.md 5 分钟上手
+- [x] docs/architecture.md 分层架构与组件
+- [x] docs/agents.md 9 agent 详解
+- [x] docs/configuration.md 完整配置字段表
+- [x] docs/cli.md 子命令与 flag
+- [x] docs/aiclibridge.md 集成、自动安装、同步升级
+- [x] docs/workflow.md 端到端流程
+- [x] docs/development.md 开发指南
+- [x] RELEASE.md 定义 tag 格式 x.x.x 与 release 流程
+- [x] .github/workflows/release.yml 打 tag 自动构建多平台二进制并发布
+- [x] CHANGELOG.md 含 v0.1.0 初始条目
+- [x] CONTRIBUTING.md 约定每次修改同步更新文档
+- [x] .github/pull_request_template.md 含文档检查项
+- [x] go build ./... 通过
+- [x] go vet ./... 通过
+- [x] go test ./... 通过
+- [x] zzauto serve --no-auto-install 在 aicli 不可达时退出 1
+- [x] zzauto upgrade 同步调用 aiclibridge upgrade（成功/失败均不 panic）
+- [x] 提交变更并打 tag v0.2.0，推送触发 release workflow

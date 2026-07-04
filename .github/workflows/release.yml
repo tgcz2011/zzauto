@@ -1,0 +1,162 @@
+# zzauto Release 工作流
+#
+# 触发：推送 v* tag（如 v0.2.0、v0.2.0-rc.1）
+# 产物：5 个平台二进制压缩包 + 5 个 sha256 校验文件
+# 文件名约定与 scripts/install.sh / internal/installer/installer.go 严格一致：
+#   zzauto-<os>-<arch>.tar.gz   （darwin/linux）
+#   zzauto-<os>-<arch>.zip      （windows）
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # 创建 Release 与上传资产需要写权限
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # 单个平台失败不影响其他平台构建
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            archive_ext: zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          # 通过 ldflags 把 tag 名注入 main.Version
+          # windows 输出 zzauto.exe，其余平台输出 zzauto
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            go build -ldflags "-X main.Version=${GITHUB_REF_NAME}" -o zzauto.exe ./cmd/zzauto
+          else
+            go build -ldflags "-X main.Version=${GITHUB_REF_NAME}" -o zzauto ./cmd/zzauto
+          fi
+
+      - name: Package archive
+        id: package
+        run: |
+          # 资产名严格匹配 scripts/install.sh 与 installer.go 的 assetName 约定
+          archive="zzauto-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.archive_ext }}"
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            zip "$archive" zzauto.exe
+          else
+            tar -czf "$archive" zzauto
+          fi
+          # 生成 sha256 校验文件（格式："<hash>  <filename>"，兼容 shasum/sha256sum）
+          sha256sum "$archive" > "$archive.sha256"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "archive_sha=${archive}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.archive }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive_sha }}
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true  # 把所有 artifact 内容合并到同一目录
+
+      - name: List downloaded assets
+        run: |
+          ls -la assets/
+          echo "----"
+          ls -la assets/ | wc -l
+
+      - name: Extract changelog section
+        run: |
+          # 从 CHANGELOG.md 提取当前 tag 对应版本段，写入 changelog_body.md 作为 Release body
+          # 形如 "## [v0.2.0] - 2026-07-04" 到下一个 "## [" 之间
+          python3 - <<'PY' > changelog_body.md
+          import re, sys, os
+          version = os.environ["VERSION"]
+          try:
+              with open("CHANGELOG.md", encoding="utf-8") as f:
+                  content = f.read()
+          except FileNotFoundError:
+              sys.exit(0)
+          # 匹配 "## [v0.2.0]" 或 "## [v0.2.0] - 2026-07-04"
+          pattern = re.compile(
+              r"(##\s*\[" + re.escape(version) + r"\][^\n]*\n)(.*?)(?=\n##\s*\[|\Z)",
+              re.S,
+          )
+          m = pattern.search(content)
+          if m:
+              print(m.group(1) + m.group(2).rstrip() + "\n")
+          PY
+          # 若未提取到内容（文件为空或无对应版本段），回退到自动生成
+          if [ ! -s changelog_body.md ]; then
+            echo "## ${GITHUB_REF_NAME}" > changelog_body.md
+            echo "" >> changelog_body.md
+            echo "（CHANGELOG.md 未找到该版本段，详见提交历史。）" >> changelog_body.md
+          fi
+          echo "---- changelog_body.md ----"
+          cat changelog_body.md
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 显式标记 prerelease：tag 含 -rc 后缀（如 v0.2.0-rc.1）视为预发布
+          # 预发布不会成为 releases/latest，不影响 zzauto upgrade
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: changelog_body.md
+          files: |
+            assets/zzauto-darwin-amd64.tar.gz
+            assets/zzauto-darwin-amd64.tar.gz.sha256
+            assets/zzauto-darwin-arm64.tar.gz
+            assets/zzauto-darwin-arm64.tar.gz.sha256
+            assets/zzauto-linux-amd64.tar.gz
+            assets/zzauto-linux-amd64.tar.gz.sha256
+            assets/zzauto-linux-arm64.tar.gz
+            assets/zzauto-linux-arm64.tar.gz.sha256
+            assets/zzauto-windows-amd64.zip
+            assets/zzauto-windows-amd64.zip.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: false

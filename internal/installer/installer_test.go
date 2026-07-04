@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -270,4 +271,63 @@ func TestUpgradeCheck_MirrorApplied(t *testing.T) {
 	if hitPath == "" {
 		t.Error("UpgradeCheck 似乎未通过镜像前缀访问 mock server")
 	}
+}
+
+// TestUpgrade_SyncsAiclibridge 验证 Upgrade() 成功后会同步升级 aiclibridge，
+// 且 aiclibridge 升级失败不影响 Upgrade 的返回值（仅警告，仍返回 nil）。
+//
+// 测试策略：用 httptest mock /releases/latest 返回与 CurrentVersion 相同的版本，
+// 使 Upgrade() 走"已是最新版本"早返回路径（避免真实下载/替换二进制）；
+// 同时覆写 upgradeAiclibridgeFunc 为 mock，验证其被调用且失败时不影响 Upgrade 结果。
+func TestUpgrade_SyncsAiclibridge(t *testing.T) {
+	// mock /releases/latest：302 重定向到 CurrentVersion，触发"已是最新版本"路径
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://github.com/tgcz2011/zzauto/releases/tag/"+CurrentVersion)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	// 备份并覆写包变量
+	origURL := releasesLatestURL
+	releasesLatestURL = srv.URL + "/releases/latest"
+	origMirror := os.Getenv("GITHUB_MIRROR")
+	os.Unsetenv("GITHUB_MIRROR")
+	t.Cleanup(func() {
+		releasesLatestURL = origURL
+		os.Setenv("GITHUB_MIRROR", origMirror)
+	})
+
+	t.Run("成功时mock被调用一次", func(t *testing.T) {
+		called := 0
+		origFn := upgradeAiclibridgeFunc
+		upgradeAiclibridgeFunc = func() error {
+			called++
+			return nil
+		}
+		t.Cleanup(func() { upgradeAiclibridgeFunc = origFn })
+
+		if err := Upgrade(); err != nil {
+			t.Fatalf("Upgrade() 意外错误: %v", err)
+		}
+		if called != 1 {
+			t.Errorf("upgradeAiclibridgeFunc 调用次数 = %d, 期望 1", called)
+		}
+	})
+
+	t.Run("mock返回错误时Upgrade仍返回nil", func(t *testing.T) {
+		called := 0
+		origFn := upgradeAiclibridgeFunc
+		upgradeAiclibridgeFunc = func() error {
+			called++
+			return fmt.Errorf("aiclibridge 未安装，无法同步升级")
+		}
+		t.Cleanup(func() { upgradeAiclibridgeFunc = origFn })
+
+		if err := Upgrade(); err != nil {
+			t.Errorf("Upgrade() 在 aiclibridge 失败时应返回 nil，实际: %v", err)
+		}
+		if called != 1 {
+			t.Errorf("upgradeAiclibridgeFunc 调用次数 = %d, 期望 1", called)
+		}
+	})
 }
