@@ -25,11 +25,14 @@ go build ./...
 go build -o zzauto ./cmd/zzauto
 
 # 运行
-./zzauto version   # v0.3.0
-./zzauto serve
+./zzauto version   # v0.4.0
+./zzauto serve     # 前台启动（开发调试）
+./zzauto start     # 后台 daemon 启动（生产）
+./zzauto status    # 查看 daemon 状态
+./zzauto stop      # 停止 daemon
 ```
 
-> GitHub Actions 在 release 时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖 `main.Version`，使二进制版本号对应 git tag。本地 `go build` 产物版本号为源码常量 `v0.3.0`。
+> GitHub Actions 在 release 时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖 `main.Version`，使二进制版本号对应 git tag。本地 `go build` 产物版本号为源码常量 `v0.4.0`。
 
 ---
 
@@ -72,11 +75,15 @@ zzauto/
       errors.go          # ErrNoConsensus / ErrEvaluationFailed
       listener.go ... gittor_agent.go
     aicli/               # aiclibridge HTTP 客户端
-      client.go          # Chat/Ask/AskWithModel/ChatWithModel/SetModel/Model
-      bootstrap.go       # EnsureInstalled 自动安装
+      client.go          # Chat/Ask/AskWithModel/ChatWithModel/SetModel/Model/Models
+      bootstrap.go       # EnsureInstalled（Health → lookPath → start daemon / install+start）+ StartDaemon
       runs.go            # v0.3.0 RunStream（SSE）+ GetRun
       stats.go           # v0.3.0 Usage/Prices/Summary/Concurrency
     config/              # 配置加载（zzauto.yaml + ZZAUTO_* env）+ Save + RoleModels
+    daemon/              # v0.4.0 zzauto 自身 daemon 管理（Start/Stop/Restart/Status + PID 文件 + 日志重定向）
+      daemon.go          # 跨平台核心
+      daemon_unix.go     # Unix setsid + SIGTERM/SIGKILL
+      daemon_windows.go  # Windows CREATE_NEW_PROCESS_GROUP + taskkill
     eventbus/            # 发布/订阅事件总线（含 agent_run_event）
     ghcli/               # v0.3.0 gh CLI 检测/安装提示/auth/Repos
     gittor/              # git CLI 隔离层
@@ -109,6 +116,13 @@ zzauto/
 - **`internal/eventbus`**：v0.3.0 新增 `EventAgentRunEvent` 事件类型。
 - **`internal/registry`**：v0.3.0 `RegisterAgents` 接收 `roleModels` 参数注入到各 agent；`BuildOrchestrator` 改为接收 `cfg/ws/bus/askFunc`，由调用方（UI handler）按项目装配。
 - **`internal/ui`**：v0.3.0 `Handler` 持 `projects.Registry` 而非单个 workspace；`currentWS()` 按当前选中项目动态构造；新增 17 路由覆盖 projects/gh/settings/stats/runs；前端 SPA 改造为 4 页面切换。
+
+### v0.4.0 新增/变更的内部包
+
+- **`internal/daemon`（新增）**：zzauto 自身后台 daemon 管理。`Start(serveArgs)` fork `zzauto serve` 子进程脱离终端（Unix `setsid` / Windows `CREATE_NEW_PROCESS_GROUP`），stdout/stderr 重定向到 `~/.zzauto/zzauto.log`，PID 写入 `~/.zzauto/zzauto.pid`；`Stop()` 读 PID 发 SIGTERM、5s 后 SIGKILL（Windows 用 `taskkill /T /F`）；`Restart()` = Stop + Start；`Status()` 返回 running/pid/listen。包级变量 `pidFilePath`/`logFilePath`/`processAlive`/`signalProcess`/`termSignal`/`killSignal` 可被测试覆写注入临时路径与 fake 信号。详见 [architecture.md](./architecture.md) 的「daemon 管理」一节与 [cli.md](./cli.md) 的 `start`/`stop`/`restart`/`status` 章节。
+- **`internal/aicli`**：v0.4.0 `bootstrap.go` 修复 `EnsureInstalled` 检测逻辑（Health → `lookPath` → 已装 `StartDaemon` / 未装 install+`StartDaemon`，不再误装已装未启的 aiclibridge）；新增 `StartDaemon(ctx)` 调 `aiclibridge start` 子命令（`startDaemonFunc` 包变量便于测试注入）；`client.go` 新增 `Models(ctx)` GET `/v1/models`（OpenAI 兼容 `ModelsResp`）。
+- **`internal/ui`**：v0.4.0 新增 `GET /api/aicli/models` 代理 aiclibridge `/v1/models`（`handleAicliModels`，失败返回 502）；前端 `app.js` `loadModels` 拉 `/api/aicli/models` 填 `availableModels`，Settings 页 model input 改 `<input list>` + `<datalist>`，aiclibridge 不可达时退化为纯 input。
+- **`cmd/zzauto/main.go`**：v0.4.0 `Version` 常量 `v0.3.0` → `v0.4.0`；无参数 = `usage()` exit 0（不再默认 serve）；新增 `start`/`stop`/`restart`/`status` 子命令分发；`usage` 更新列出全部子命令。
 
 ---
 

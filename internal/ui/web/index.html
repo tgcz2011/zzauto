@@ -207,6 +207,11 @@
     <!-- ========== 设置页 ========== -->
     <div x-show="page==='settings'">
       <div class="bg-white rounded-lg shadow p-6 max-w-3xl mx-auto">
+        <datalist id="models-list">
+          <template x-for="m in availableModels" :key="m">
+            <option :value="m"></option>
+          </template>
+        </datalist>
         <div class="flex items-center mb-4">
           <h2 class="font-semibold text-gray-900 text-lg">角色模型设置</h2>
           <button @click="loadModels()"
@@ -220,7 +225,7 @@
           <template x-for="a in agents" :key="a.stage">
             <div class="grid grid-cols-12 gap-2 items-center">
               <label class="col-span-4 md:col-span-3 text-sm text-gray-700 font-medium" x-text="a.stage"></label>
-              <input type="text" x-model="roleModels[a.stage]"
+              <input type="text" x-model="roleModels[a.stage]" list="models-list"
                      :placeholder="defaultModel || 'claude/anthropic/claude-sonnet-4.5'"
                      class="col-span-8 md:col-span-9 text-sm border border-gray-300 rounded px-2 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>

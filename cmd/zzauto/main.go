@@ -12,6 +12,7 @@ import (
 
 	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/config"
+	"github.com/tgcz2011/zzauto/internal/daemon"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/ghcli"
 	"github.com/tgcz2011/zzauto/internal/installer"
@@ -20,20 +21,28 @@ import (
 )
 
 // Version zzauto 版本号。
-const Version = "v0.3.0"
+const Version = "v0.4.0"
 
 func main() {
 	log.SetFlags(0)
 
 	args := os.Args[1:]
 	if len(args) == 0 {
-		runServe(args)
+		usage()
 		return
 	}
 
 	switch args[0] {
 	case "serve":
 		runServe(args[1:])
+	case "start":
+		runStart(args[1:])
+	case "stop":
+		runStop(args[1:])
+	case "restart":
+		runRestart(args[1:])
+	case "status":
+		runStatus(args[1:])
 	case "uninstall":
 		runUninstall(args[1:])
 	case "upgrade":
@@ -56,13 +65,85 @@ func usage() {
   zzauto [command]
 
 命令:
-  serve       启动 HTTP 服务与编排器（默认，--no-auto-install 禁用自动安装）
-  uninstall   移除二进制与配置（保留项目数据）
+  serve       前台启动 HTTP 服务（开发调试）
+  start       后台启动 daemon（terminal 可关闭）
+  stop        停止后台 daemon
+  restart     重启后台 daemon
+  status      查看 daemon 状态
   upgrade     从 GitHub releases 升级
+  uninstall   移除二进制与配置（保留项目数据）
   version     打印版本号
 
-默认（无子命令）等同于 serve。
+无参数等同 -h。daemon 日志: ~/.zzauto/zzauto.log
 `, Version)
+}
+
+func runStart(args []string) {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	listen := fs.String("listen", "", "监听地址（覆盖配置）")
+	noAutoInstall := fs.Bool("no-auto-install", false, "aiclibridge 不可达时不自动安装，仅提示并退出")
+	_ = fs.Parse(args)
+
+	serveArgs := []string{}
+	if *listen != "" {
+		serveArgs = append(serveArgs, "--listen", *listen)
+	}
+	if *noAutoInstall {
+		serveArgs = append(serveArgs, "--no-auto-install")
+	}
+
+	if err := daemon.Start(serveArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "启动 daemon 失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runStop(args []string) {
+	fs := flag.NewFlagSet("stop", flag.ExitOnError)
+	_ = fs.Parse(args)
+	if err := daemon.Stop(); err != nil {
+		fmt.Fprintf(os.Stderr, "停止 daemon 失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runRestart(args []string) {
+	fs := flag.NewFlagSet("restart", flag.ExitOnError)
+	listen := fs.String("listen", "", "监听地址（覆盖配置）")
+	noAutoInstall := fs.Bool("no-auto-install", false, "aiclibridge 不可达时不自动安装，仅提示并退出")
+	_ = fs.Parse(args)
+
+	serveArgs := []string{}
+	if *listen != "" {
+		serveArgs = append(serveArgs, "--listen", *listen)
+	}
+	if *noAutoInstall {
+		serveArgs = append(serveArgs, "--no-auto-install")
+	}
+
+	if err := daemon.Restart(serveArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "重启 daemon 失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runStatus(args []string) {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	_ = fs.Parse(args)
+	running, pid, listen, err := daemon.Status()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "查询状态失败: %v\n", err)
+		os.Exit(1)
+	}
+	if !running {
+		fmt.Println("daemon 未运行")
+		return
+	}
+	fmt.Printf("daemon 运行中 (PID=%d)\n", pid)
+	if listen != "" {
+		fmt.Printf("监听: %s\n", listen)
+	}
+	fmt.Println("日志: ~/.zzauto/zzauto.log")
 }
 
 func runVersion(args []string) {

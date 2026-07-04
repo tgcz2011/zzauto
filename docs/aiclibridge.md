@@ -14,6 +14,7 @@ aiclibridge 是独立部署的本地 HTTP 网关（默认监听 `127.0.0.1:8787`
 - **Anthropic 兼容**：`POST /v1/messages`（请求体 `{model, max_tokens, system, messages:[{role,content}]}`，响应 `{content:[{type,text}]}`）。
 - **Run SSE 流（v0.3.0）**：`POST /v1/runs`（请求体 `{model, system, messages, stream:true}`，响应 `text/event-stream`，按 `data: <json>\n\n` 帧推送 `RunEvent`：thinking/text/tool_use/tool_result/result/error/system）。
 - **Run 详情（v0.3.0）**：`GET /v1/runs/{id}`，返回单个 run 的完整事件时间线（id/model/status/created_at/events）。
+- **Models 列表（v0.4.0）**：`GET /v1/models`，OpenAI 兼容格式 `{object:"list", data:[{id, object:"model", owned_by}]}`，列出 aiclibridge 已配置可用的模型，供 zzauto Settings 页下拉选择。
 - **统计端点（v0.3.0）**：
   - `GET /v1/stats/usage`：各模型用量（prompt/completion/total tokens、requests、usd）+ 汇总。
   - `GET /v1/stats/prices`：各模型每 1M token 定价。
@@ -30,6 +31,7 @@ zzauto 的 `internal/aicli/` 封装了上述调用：
 - **每角色模型（v0.3.0）**：`ChatWithModel`/`AskWithModel` 用传入 model 覆盖本次请求；`SetModel`/`Model` 读写默认模型。
 - **Run 流（v0.3.0，`runs.go`）**：`RunStream` SSE 解析 + 回调，`GetRun` 拉取详情。
 - **Stats（v0.3.0，`stats.go`）**：`Usage`/`Prices`/`Summary`/`Concurrency` 四个方法对应四个端点。
+- **Models（v0.4.0，`client.go`）**：`Models(ctx)` GET `/v1/models`，返回 `*ModelsResp`（`{Object, Data: []ModelItem{ID, Object, OwnedBy}}`），供 UI Settings 页下拉填充可选模型。
 - 地址归一化：去掉 `http://`/`https://` 前缀与尾部斜杠。
 
 ---
@@ -78,20 +80,58 @@ if err := aiClient.Health(healthCtx); err != nil {
 
 ---
 
-## 自动安装
+## 自动检测与启动（v0.4.0 修复）
 
-`aicli.EnsureInstalled`（`internal/aicli/bootstrap.go`）负责安装并就绪探测：
+`aicli.EnsureInstalled`（`internal/aicli/bootstrap.go`）负责检测、按需安装并启动 daemon。**v0.4.0 修复了检测逻辑**：不再「Health 失败就装」，而是先判断 aiclibridge 是否已安装——已装但未启动时仅 `aiclibridge start` 启动 daemon，避免误装覆盖已有安装。
 
-1. **预探测**：再做一次健康检查，若已可达直接返回（避免重复安装）。
-2. **执行安装脚本**（按平台分发，输出实时打印到 stderr 便于用户看到进度）：
-   - macOS / Linux：`sh -c "curl -fsSL https://github.com/tgcz2011/aiclibridge/raw/main/scripts/install.sh | sh"`
-   - Windows：`powershell -Command "irm https://github.com/tgcz2011/aiclibridge/raw/main/scripts/install.ps1 | iex"`
-3. **安装后健康轮询**：每 2 秒探测一次 `/healthz`，最长等待 30 秒（`healthCheckTimeout`）。通过即返回；超时返回 `aiclibridge 安装后健康检查超时`；context 取消则返回取消错误。
-4. serve 调用 `EnsureInstalled` 时传入 5 分钟超时 context，足以覆盖下载 + 启动 + 轮询全过程。
+### 新逻辑
 
-自动安装失败时 serve 会打印失败原因与手动安装命令后退出，用户可手动重试。
+```
+1. Health(ctx) 健康检查
+   - 可达 → return nil（已就绪，什么都不做）
 
-> 跳过自动安装：`zzauto serve --no-auto-install`。该 flag 默认 false。为 true 时 aiclibridge 不可达仅提示并退出码 1，不自动安装。
+2. Health 失败 → exec.LookPath("aiclibridge") 检测是否已装
+   a. 已装 → log "aiclibridge 已安装但不可达，启动 daemon..."
+            → StartDaemon(ctx): exec "aiclibridge start"
+   b. 未装 → log "aiclibridge 未安装，执行安装..."
+            → installAiclibridge(ctx)（macOS/Linux curl|sh / Windows irm|iex）
+            → StartDaemon(ctx): exec "aiclibridge start"
+
+3. 启动 daemon 后轮询 Health：每 2 秒一次，最长等 30 秒（healthCheckTimeout）
+   - 通过 → return nil
+   - 超时 → return "aiclibridge 启动后健康检查超时"
+   - ctx 取消 → return 取消错误
+```
+
+### 关键变化（相对 v0.3.0）
+
+| 场景 | v0.3.0 行为 | v0.4.0 行为 |
+| --- | --- | --- |
+| aiclibridge 已装且在运行 | Health OK，直接返回 | Health OK，直接返回（不变） |
+| aiclibridge **已装但未启动** | 误判为「未装」，重新执行安装脚本覆盖 | `lookPath` 命中 → `aiclibridge start` 启动 daemon，不重装 |
+| aiclibridge 未装 | 执行安装脚本 + 健康轮询 | 执行安装脚本 → `start` daemon → 健康轮询 |
+
+### 可注入测试点（包级变量）
+
+- `healthCheckTimeout`：启动 daemon 后健康检查总超时（默认 30s）。
+- `installFunc`：安装函数，默认 nil 时用 `installAiclibridge`，测试可替换为 fake。
+- `lookPath`：判断二进制是否在 PATH，默认 `exec.LookPath`。
+- `aicliBinaryName`：二进制名，默认 `aiclibridge`。
+- `startDaemonFunc`：启动 daemon 函数，默认 `StartDaemon`，测试可替换为 fake。
+
+### `StartDaemon(ctx)`
+
+```go
+func StartDaemon(ctx context.Context) error
+```
+
+调用 `aiclibridge start` 子命令启动后台 daemon。`aiclibridge start` 会 fork 脱离终端的子进程并立即返回，daemon 由 aiclibridge 自己的 PID 文件管理。`CombinedOutput` 捕获输出，失败返回 `aiclibridge start 失败: <err> (输出=<stdout/stderr>)`。
+
+### serve 调用
+
+serve 启动时传入 5 分钟超时 context 调 `EnsureInstalled`，足以覆盖下载 + 启动 + 轮询全过程。失败时 serve 打印失败原因与手动安装命令后 `os.Exit(1)`。
+
+> **跳过自动检测/启动**：`zzauto serve --no-auto-install`（或 `zzauto start --no-auto-install`）。该 flag 默认 false。为 true 时 aiclibridge 不可达仅提示并退出码 1，不自动安装也不自动启动。
 
 ---
 
@@ -143,6 +183,27 @@ zzauto serve
 
 ---
 
+## aiclibridge 子命令（手动管理 daemon）
+
+aiclibridge 自身是独立 CLI，提供后台 daemon 管理子命令。zzauto 的 `EnsureInstalled` 在「已装未启」分支会自动调 `aiclibridge start`，但用户也可手动管理（排查问题、自定义启动参数等）。
+
+| 子命令 | 说明 |
+| --- | --- |
+| `aiclibridge serve` | 前台运行（开发调试，日志直接打印到终端） |
+| `aiclibridge start` | 后台启动 daemon（fork 子进程脱离终端，由 aiclibridge 自己的 PID 文件管理） |
+| `aiclibridge stop` | 停止后台 daemon |
+| `aiclibridge restart` | 重启后台 daemon |
+| `aiclibridge upgrade` | 从 aiclibridge 仓库升级自身二进制 |
+| `aiclibridge uninstall` | 卸载 aiclibridge |
+| `aiclibridge version` | 打印版本号 |
+| `aiclibridge`（无参数） | 打印 usage，退出码 0 |
+
+> zzauto `upgrade` 在自身升级后会 best-effort 调 `aiclibridge upgrade` 同步升级（详见「关于同步升级」一节）。
+>
+> aiclibridge 的子命令参数与 PID 文件路径以 aiclibridge 仓库文档为准；zzauto 仅依赖 `start` 子命令做自动启动。
+
+---
+
 ## 关于 agents 启用
 
 aiclibridge 侧负责配置各 AI 后端（模型路由、API key、并发等）。zzauto 侧的「agents 启用」是指编排器注册的 9 个 agent 是否参与流程——当前版本由 `registry.RegisterAgents` 固定注册全部 9 个 agent，未提供按需启停单个 agent 的配置开关。
@@ -189,6 +250,28 @@ zzauto 的 `agents.RunWithTracking` 用 RunStream 调用 AI，把每个事件：
 2. 累积到内存切片，结束后写到 `<projectDir>/runs/<agent>/<runID>.json`。
 
 UI 任务面板通过 `GET /api/projects/{id}/runs` 列出 run 摘要，`GET /api/projects/{id}/runs/{rid}` 读取完整事件时间线，按事件类型着色展示。详见 [task-panel.md](./task-panel.md)。
+
+### Models（v0.4.0，Settings 页下拉数据源）
+
+| 端点 | 用途 | zzauto 客户端方法 | zzauto HTTP 代理路由 |
+| --- | --- | --- | --- |
+| `GET /v1/models` | 列出 aiclibridge 已配置可用的模型（OpenAI 兼容格式） | `aicli.Models(ctx)` | `GET /api/aicli/models` |
+
+响应结构（OpenAI 兼容）：
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "claude/anthropic/claude-sonnet-4.5", "object": "model", "owned_by": "anthropic"},
+    {"id": "openai/gpt-4o", "object": "model", "owned_by": "openai"}
+  ]
+}
+```
+
+zzauto UI Settings 页加载时调 `GET /api/aicli/models`，把 `data[].id` 填入 `availableModels` 数组，渲染为每个 role model input 的 `<datalist>` 下拉选项。用户可从下拉选模型，也可手动输入自定义模型名。**aiclibridge 不可达时该路由返回错误，前端退化为纯 input**（不影响手动填写），详见 [settings.md](./settings.md)。
+
+> 该端点只读，模型清单由 aiclibridge 侧配置决定（路由 / API key / 启用开关等）。zzauto 不修改 aiclibridge 的模型配置。
 
 ---
 
@@ -245,10 +328,11 @@ UI 任务面板通过 `GET /api/projects/{id}/runs` 列出 run 摘要，`GET /ap
 
 | 文件 | 职责 |
 | --- | --- |
-| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Health/Chat/Messages/Ask/AskWithModel/ChatWithModel/SetModel/Model） |
+| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Health/Chat/Messages/Ask/AskWithModel/ChatWithModel/SetModel/Model/Models） |
+| `internal/aicli/bootstrap.go` | `EnsureInstalled`（Health → lookPath → start daemon / install+start）+ `StartDaemon` + `UpgradeAiclibridge`（v0.4.0 修复检测逻辑） |
 | `internal/aicli/runs.go`（v0.3.0） | RunStream（SSE）+ GetRun |
 | `internal/aicli/stats.go`（v0.3.0） | Usage/Prices/Summary/Concurrency |
-| `cmd/zzauto/main.go` | serve 启动时的健康检查与提示 |
+| `cmd/zzauto/main.go` | serve 启动时的健康检查与提示（无参数 = usage） |
 | `internal/config/config.go` | `aicli_addr`/`aicli_key` 字段 + `RoleModels` |
 | `internal/agents/agent.go` | `AIClient` 接口定义 + `RunWithTracking` |
-| `internal/ui/handler.go` | `/api/stats/*` 代理 + `/api/projects/{id}/runs/*` |
+| `internal/ui/handler.go` | `/api/stats/*` 代理 + `/api/projects/{id}/runs/*` + `/api/aicli/models`（v0.4.0） |

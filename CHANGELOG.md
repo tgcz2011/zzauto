@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-07-04
+### Added
+- zzauto daemon 化：新增 start/stop/restart/status 子命令；fork 子进程脱离终端（Unix setsid / Windows CREATE_NEW_PROCESS_GROUP），PID 文件管理 ~/.zzauto/zzauto.pid，日志 ~/.zzauto/zzauto.log
+- zzauto 无参数 = -h（打印 usage exit 0），不再默认 serve
+- aicli Models 客户端：Models(ctx) GET /v1/models（OpenAI 兼容格式）
+- HTTP API /api/aicli/models 代理 aiclibridge /v1/models
+- UI Settings 页 model input 改为 datalist 下拉（来自 /api/aicli/models），失败退化为纯 input
+- internal/daemon 包：Start/Stop/Restart/Status，Unix setsid + PID 文件 + 日志重定向，Windows CREATE_NEW_PROCESS_GROUP + taskkill
+
+### Changed
+- 修复 aiclibridge 检测逻辑：EnsureInstalled 改为 Health → lookPath → 已装则 aiclibridge start 启动 daemon / 未装才 install+start；不再误装已装但未启动的 aiclibridge
+- internal/aicli/bootstrap.go 新增 StartDaemon(ctx) 调 aiclibridge start 子命令；startDaemonFunc 包变量便于测试注入
+- main.go usage 更新：列出 start/stop/restart/status，说明无参数等同 -h
+
 ## [v0.3.0] - 2026-07-04
 ### Added
 - 多项目支持：`internal/projects` 包 `Registry` 管理多项目，UI 项目列表/新建/切换/删除；每项目对应 `<workspaceDir>/projects/<id>/project.json` 元数据

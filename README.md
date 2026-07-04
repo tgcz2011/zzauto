@@ -4,7 +4,7 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)
-![Release](https://img.shields.io/badge/release-v0.3.0-orange)
+![Release](https://img.shields.io/badge/release-v0.4.0-orange)
 
 ---
 
@@ -35,15 +35,17 @@
   - `Gittor` 评估通过后将 `code/` 提交并推送到远端，遵循 conventional commits
 - **文档驱动**：`desire.md → need.md → spec.md → deal.md → task.md → report`，agent 间通过 workspace 文件系统传递
 - **Generator 上下文隔离**：只读 Executor 投喂的指令，不读 desire/need/spec/deal/task
-- **aiclibridge 统一 AI 调用**：本地 HTTP 服务统一封装各 AI 后端；`serve` 时自动检测并安装，`upgrade` 时同步升级
+- **aiclibridge 统一 AI 调用**：本地 HTTP 服务统一封装各 AI 后端；`serve` 时自动检测与启动（已装未启自动 `aiclibridge start`，未装才安装并启动），`upgrade` 时同步升级
 - **Gittor 隔离层**：通过注入的 `GittorClient` 调用 git CLI，conventional commits，不污染其他 agent
 - **Web UI**：embed 进单二进制，SSE 实时推送 agent 事件，Asker 交互问答通过浏览器完成
 - **多项目支持**：`internal/projects` Registry 管理多项目，UI 项目列表/新建/切换/删除，每个项目独立 workspace 与 `project.json` 元数据
 - **gh CLI 集成**：`serve` 启动时检测 gh CLI，未装则按平台打印安装命令并退出 1，未登录则提示 `gh auth login` 退出 1；新建项目弹窗从 `gh repo list` 拉取仓库下拉
 - **创建项目选 gh 仓库**：UI 新建项目弹窗从 `GET /api/gh/repos` 拉取仓库列表，选择 owner/repo 与分支即完成项目与远端仓库绑定
 - **每角色模型配置**：`config.RoleModels` + Settings 页，9 个 agent 各自配置模型，env `ZZAUTO_ROLE_MODEL_<STAGE>` 覆盖，持久化到 `zzauto.yaml`
+- **每角色模型下拉选择（v0.4.0）**：Settings 页 model input 改为 datalist 下拉，选项来自 `GET /api/aicli/models`（代理 aiclibridge `/v1/models`），aiclibridge 不可达时退化为纯 input
 - **统计面板**：从 aiclibridge `/v1/stats/usage|summary|concurrency` 拉取 token/USD/并发数据，4 卡片 + 模型分布表 + 自动刷新
 - **任务面板**：每个 agent 的 run 详情（thinking/text/tool_use/tool_result/result/error 事件流），按项目+agent 查看，SSE 实时推送
+- **zzauto 自身 daemon 化（v0.4.0）**：新增 `start`/`stop`/`restart`/`status` 子命令，fork 子进程脱离终端（Unix setsid / Windows CREATE_NEW_PROCESS_GROUP），PID 文件管理 `~/.zzauto/zzauto.pid`，日志 `~/.zzauto/zzauto.log`；无参数 = `-h`
 - **多平台安装**：macOS/Linux 一行 `curl | sh`，Windows 一行 `irm | iex`；`uninstall` / `upgrade` 走 GitHub releases 直链，不依赖 `gh` CLI
 
 ## 架构图
@@ -129,11 +131,21 @@ gh auth login
 启动：
 
 ```sh
-# 启动（首次会自动检测并安装 aiclibridge 本地 AI 网关，并校验 gh CLI 安装与登录状态）
-zzauto serve
+# 后台 daemon 启动（推荐生产用法，terminal 可关闭）
+# 首次会自动检测 aiclibridge：已装未启则自动 `aiclibridge start`，未装才安装并启动；
+# 同时校验 gh CLI 安装与登录状态
+zzauto start
+
+# 查看状态
+zzauto status
+
+# 停止后台 daemon
+zzauto stop
 
 # 浏览器打开 http://127.0.0.1:8788，提交需求，等待 Asker 在页面问答
 ```
+
+> 开发调试可用 `zzauto serve` 前台启动（日志直接打印到终端）。日志查看：`~/.zzauto/zzauto.log`。
 
 ### Windows (PowerShell)
 
@@ -148,7 +160,12 @@ winget install GitHub.cli
 # 登录
 gh auth login
 
-# 启动
+# 启动（后台 daemon）
+zzauto start
+zzauto status
+zzauto stop
+
+# 或前台调试
 zzauto serve
 
 # 浏览器打开 http://127.0.0.1:8788
@@ -207,18 +224,32 @@ role_models:
 
 | 命令         | 说明                                         | Flags                                                                |
 | ------------ | -------------------------------------------- | -------------------------------------------------------------------- |
-| `serve`      | 启动 HTTP 服务与编排器（无子命令时的默认行为） | `--listen <addr>` 覆盖监听地址；`--no-auto-install` 跳过 aiclibridge 自动安装 |
+| `serve`      | 前台启动 HTTP 服务与编排器（开发调试用）     | `--listen <addr>` 覆盖监听地址；`--no-auto-install` 跳过 aiclibridge 自动安装 |
+| `start`      | 后台启动 daemon（terminal 可关闭，推荐生产用法） | 同 `serve`，flags 透传给后台 `serve` 子进程 |
+| `stop`       | 停止后台 daemon                              | —                                                                    |
+| `restart`    | 重启后台 daemon                              | 同 `start`，flags 透传给新的后台 `serve` 子进程 |
+| `status`     | 查看 daemon 状态（running/pid/listen）       | —                                                                    |
 | `uninstall`  | 移除二进制与配置（保留项目数据）             | —                                                                    |
 | `upgrade`    | 从 GitHub releases 升级 zzauto 二进制         | —                                                                    |
 | `version`    | 打印版本号                                   | —                                                                    |
+| 无参数 / `-h` / `--help` / `help` | 打印 usage，退出码 0             | —                                                                    |
 
-> `serve` 启动顺序（v0.3.0）：加载配置 → aiclibridge 健康检查（不可达则自动安装或 `--no-auto-install` 退出 1）→ **gh CLI 检查（未装则按平台打印安装命令并退出 1，未登录则提示 `gh auth login` 退出 1）** → 启动 HTTP 服务。编排器不再启动时自动装配，改为 UI 在选中项目点「启动编排」时按需 `POST /api/projects/{id}/start`。
+> **无参数行为**：v0.4.0 起直接 `zzauto`（无任何子命令）等同 `-h`，打印 usage 并以退出码 0 退出（v0.3.0 是默认 `serve`）。未知子命令打印 usage 并以退出码 2 退出。
+>
+> **daemon 化（v0.4.0）**：`start`/`restart` fork `zzauto serve` 子进程脱离终端（Unix `setsid` / Windows `CREATE_NEW_PROCESS_GROUP`），PID 文件 `~/.zzauto/zzauto.pid`，日志重定向到 `~/.zzauto/zzauto.log`。`stop` 读 PID 发 SIGTERM，等 5s 仍存活发 SIGKILL（Windows 用 `taskkill /T /F`）。
+>
+> **serve/start 启动顺序**（v0.4.0）：加载配置 → aiclibridge 健康检查（不可达则 Health → lookPath → 已装 `aiclibridge start` 启动 daemon / 未装才 install+start；或 `--no-auto-install` 退出 1）→ **gh CLI 检查（未装则按平台打印安装命令并退出 1，未登录则提示 `gh auth login` 退出 1）** → 启动 HTTP 服务。编排器不再启动时自动装配，改为 UI 在选中项目点「启动编排」时按需 `POST /api/projects/{id}/start`。
 
 示例：
 
 ```sh
-zzauto serve --listen 0.0.0.0:8788
-zzauto serve --no-auto-install      # 已自行安装 aiclibridge 时跳过自动安装
+zzauto                              # 打印 usage（等同 -h）
+zzauto start                        # 后台启动 daemon
+zzauto status                       # 查看状态
+zzauto stop                         # 停止 daemon
+zzauto restart --listen 0.0.0.0:8788 # 重启并改监听地址
+zzauto serve --listen 0.0.0.0:8788  # 前台启动（开发调试）
+zzauto serve --no-auto-install      # 跳过 aiclibridge 自动安装/启动，仅提示
 zzauto upgrade
 zzauto version
 ```

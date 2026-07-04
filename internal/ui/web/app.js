@@ -52,6 +52,7 @@ function appData() {
     roleModels: {},
     defaultModel: '',
     settingsSaved: false,
+    availableModels: [],  // 来自 /api/aicli/models
 
     // ---- 统计 ----
     stats: { summary: {}, usage: {}, concurrency: {} },
@@ -70,6 +71,7 @@ function appData() {
       this.connectSSE();
       await this.loadProjects();
       await this.loadModels();
+      await this.loadAvailableModels();
       // 定时轮询 v0.2.0 状态。
       setInterval(() => this.fetchState(), 2000);
       setInterval(() => this.fetchAsks(), 2000);
@@ -354,6 +356,18 @@ function appData() {
           this.settingsSaved = false;
         }
       } catch (e) { /* 忽略 */ }
+    },
+
+    async loadAvailableModels() {
+      try {
+        const resp = await fetch('/api/aicli/models');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        this.availableModels = (data.data || []).map(m => m.id);
+      } catch (e) {
+        // 失败时退化为空数组，input 仍可手输
+        this.availableModels = [];
+      }
     },
 
     async saveModels() {

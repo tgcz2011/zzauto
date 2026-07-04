@@ -1,6 +1,6 @@
 # CLI 命令参考
 
-zzauto 是单二进制 CLI，主入口在 `cmd/zzauto/main.go`，版本号常量 `Version = "v0.3.0"`。
+zzauto 是单二进制 CLI，主入口在 `cmd/zzauto/main.go`，版本号常量 `Version = "v0.4.0"`。
 
 ## 用法
 
@@ -12,27 +12,32 @@ zzauto [command]
 
 | 命令 | 说明 |
 | --- | --- |
-| `serve` | 启动 HTTP 服务与编排器（默认） |
+| `serve` | 前台启动 HTTP 服务与编排器（开发调试用） |
+| `start` | 后台启动 daemon（terminal 可关闭，推荐生产用法） |
+| `stop` | 停止后台 daemon |
+| `restart` | 重启后台 daemon |
+| `status` | 查看 daemon 状态 |
 | `uninstall` | 移除二进制与配置（保留项目数据） |
 | `upgrade` | 从 GitHub releases 升级 zzauto 二进制 |
 | `version` | 打印版本号 |
-| `-h` / `--help` / `help` | 打印用法 |
+| `-h` / `--help` / `help` / 无参数 | 打印用法 |
 
-**默认行为**：不带任何子命令（直接 `zzauto`）等同 `serve`。未知子命令打印用法并以退出码 2 退出。
+**默认行为（v0.4.0 变更）**：不带任何子命令（直接 `zzauto`）等同 `-h`，打印 usage 并以退出码 0 退出（v0.3.0 是默认 `serve`）。未知子命令打印用法并以退出码 2 退出。
 
-> 配置见 [configuration.md](./configuration.md)；上手见 [quickstart.md](./quickstart.md)。
+> 生产用法见 `start`（后台 daemon）；配置见 [configuration.md](./configuration.md)；上手见 [quickstart.md](./quickstart.md)。
 
 ---
 
 ## serve
 
-启动 HTTP 服务与编排器。
+前台启动 HTTP 服务与编排器（开发调试用）。日志直接打印到 stderr，按 `Ctrl+C` 终止。
+
+> **生产环境请用 `start`**：`start` 会 fork 子进程脱离终端、写 PID 文件、日志重定向到 `~/.zzauto/zzauto.log`，terminal 关闭后 daemon 仍在。`serve` 仅用于开发调试时观察实时日志。
 
 ### 用法
 
 ```
 zzauto serve [--listen <addr>] [--no-auto-install]
-zzauto              # 等同 serve
 ```
 
 ### 参数
@@ -50,7 +55,7 @@ zzauto              # 等同 serve
 4. **aiclibridge 健康检查**：`aicli.New(cfg.AicliAddr, cfg.AicliKey).Health(ctx)`（5 秒超时）。
    - 可达：继续启动。
    - 不可达且 `--no-auto-install=true`：打印日志与安装提示，`os.Exit(1)` 退出。
-   - 不可达且 `--no-auto-install=false`（默认）：调用 `aicli.EnsureInstalled` 自动安装（macOS/Linux 走 `curl -fsSL ... | sh`，Windows 走 `irm ... | iex`），安装后每 2 秒轮询健康检查、最长等待 30 秒。成功后继续启动；失败时打印失败原因与手动安装命令并以 `os.Exit(1)` 退出。
+   - 不可达且 `--no-auto-install=false`（默认）：调用 `aicli.EnsureInstalled` 自动检测与启动（v0.4.0 修复逻辑：Health 失败 → `exec.LookPath("aiclibridge")` → **已装则 `aiclibridge start` 启动 daemon** / **未装才执行安装脚本再 `start`**，详见 [aiclibridge.md](./aiclibridge.md)）。安装/启动后每 2 秒轮询健康检查、最长等待 30 秒。成功后继续启动；失败时打印失败原因与手动安装命令并以 `os.Exit(1)` 退出。
 5. **gh CLI 检查（v0.3.0 新增）**：`ghcli.EnsureInstalled()` 用 `exec.LookPath("gh")` 检测；未装则按平台打印安装命令（macOS `xcode-select --install` / `brew install gh`、Linux `apt`/`dnf`/`pacman`、Windows `winget`/`choco`）并 `os.Exit(1)`。
 6. **gh auth 检查（v0.3.0 新增）**：`ghcli.AuthStatus(ctx)` 执行 `gh auth status`；未登录则打印 `gh auth login` 提示并 `os.Exit(1)`；命令本身异常同样退出 1。
 7. 创建 UI handler，持 `projects.Registry` 与 `cfg`（编排器按需在 `handleStartProject` 中装配）。
@@ -101,6 +106,140 @@ zzauto              # 等同 serve
 | `GET /api/stats/concurrency` | 代理 aiclibridge /v1/stats/concurrency（v0.3.0） |
 | `GET /api/projects/{id}/runs` | 该项目的 run 摘要列表（v0.3.0） |
 | `GET /api/projects/{id}/runs/{rid}` | 该项目指定 run 的完整事件时间线（v0.3.0） |
+| `GET /api/aicli/models` | 代理 aiclibridge `/v1/models`，供 Settings 页模型下拉（v0.4.0） |
+
+---
+
+## start
+
+后台启动 zzauto daemon（fork `zzauto serve` 子进程脱离终端），推荐生产用法。terminal 关闭后 daemon 仍在运行。
+
+### 用法
+
+```
+zzauto start [--listen <addr>] [--no-auto-install]
+```
+
+### 参数
+
+| Flag | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `--listen` | string | `""`（用配置值） | 监听地址（覆盖配置 `listen`），透传给子进程的 `serve` |
+| `--no-auto-install` | bool | `false` | 透传给子进程 `serve`，aiclibridge 不可达时不自动安装/启动 |
+
+### 行为（`internal/daemon/daemon.go` `Start`）
+
+1. 先调 `Status()` 检查是否已有 daemon 在运行；若在运行则报错 `daemon 已在运行，请先 stop 或 restart`。
+2. `ensureDir()` 创建 `~/.zzauto/` 目录（权限 0o755）。
+3. 打开日志文件 `~/.zzauto/zzauto.log`（追加模式，0o644）。
+4. `os.Executable()` 获取当前二进制路径，构造 `exec.Command(exe, "serve", <serveArgs>...)`。
+5. 平台特定 detach：
+   - Unix（`daemon_unix.go`）：`SysProcAttr{Setsid: true}` 脱离控制终端。
+   - Windows（`daemon_windows.go`）：`SysProcAttr{CreationFlags: CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}`。
+6. `cmd.Stdin = nil`，`cmd.Stdout`/`cmd.Stderr` 重定向到日志文件。
+7. `cmd.Start()` 启动子进程，立即关闭父进程持有的日志文件句柄。
+8. 等待 500ms 后 `processAlive(pid)` 检查子进程是否仍存活；不存活则报错 `daemon 启动后立即退出，请查看日志`。
+9. 写 PID 文件 `~/.zzauto/zzauto.pid`（内容为子进程 PID）。
+10. 打印 `daemon 已启动 (PID=<pid>)，日志: <logPath>`。
+
+### 退出码
+
+- daemon 已在运行：1（stderr 打印错误）。
+- 创建配置目录/打开日志/获取二进制路径失败：1。
+- 子进程启动失败：1。
+- 子进程启动后立即退出：1。
+- 成功：0。
+
+> PID 文件路径 `~/.zzauto/zzauto.pid`，日志路径 `~/.zzauto/zzauto.log`。daemon 子进程实质是 `zzauto serve`，启动顺序（aiclibridge 检测/gh 检查/HTTP 服务）同 `serve` 章节。
+
+---
+
+## stop
+
+停止后台 zzauto daemon。
+
+### 用法
+
+```
+zzauto stop
+```
+
+### 参数
+
+无。
+
+### 行为（`internal/daemon/daemon.go` `Stop`）
+
+1. 读 PID 文件 `~/.zzauto/zzauto.pid`；不存在报 `daemon 未在运行`。
+2. `processAlive(pid)` 检查进程是否存活；不存活则清理残留 PID 文件并报 `daemon 未在运行（清理残留 PID 文件）`。
+3. 发 SIGTERM（Unix）/ `taskkill /PID <pid> /T /F`（Windows，无优雅终止等价物）。
+4. 每 100ms 轮询 `processAlive`，最长等 5 秒；进程退出则清理 PID 文件并打印 `daemon (PID=<pid>) 已停止`。
+5. 5 秒后仍存活则发 SIGKILL（Unix）/ 再次 `taskkill`（Windows），等 500ms 后清理 PID 文件并打印 `daemon (PID=<pid>) 已强制停止`。
+
+### 退出码
+
+- PID 文件不存在/进程已退出（含清理残留）：1（stderr 打印提示）。
+- 发送信号失败：1。
+- 成功（优雅停止或强制停止）：0。
+
+---
+
+## restart
+
+重启后台 daemon：先 `Stop`，再 `Start`。
+
+### 用法
+
+```
+zzauto restart [--listen <addr>] [--no-auto-install]
+```
+
+### 参数
+
+同 `start`：`--listen` / `--no-auto-install`，透传给新的 `serve` 子进程。
+
+### 行为（`internal/daemon/daemon.go` `Restart`）
+
+1. 调用 `Stop()`；若返回错误（如「未在运行」），仅打印 `stop 警告: <err>` 不终止流程（清理旧状态）。
+2. 调用 `Start(serveArgs)` 启动新 daemon。
+
+### 退出码
+
+- `Start` 失败：1。
+- 成功：0（`Stop` 的警告不改变退出码）。
+
+> 用于改了 `--listen` 或升级二进制后让新配置生效。
+
+---
+
+## status
+
+查看后台 daemon 运行状态。
+
+### 用法
+
+```
+zzauto status
+```
+
+### 参数
+
+无。
+
+### 行为（`internal/daemon/daemon.go` `Status`）
+
+1. 读 PID 文件 `~/.zzauto/zzauto.pid`；不存在 → 打印 `daemon 未运行`，退出码 0。
+2. `processAlive(pid)` 检查；进程已退出则清理残留 PID 文件，打印 `daemon 未运行`，退出码 0。
+3. 进程存活则打印：
+   ```
+   daemon 运行中 (PID=<pid>)
+   日志: ~/.zzauto/zzauto.log
+   ```
+
+### 退出码
+
+- 查询出错（如读 PID 文件解析失败）：1。
+- daemon 未运行或运行中：0。
 
 ---
 
@@ -176,7 +315,7 @@ zzauto version
 
 ### 行为
 
-输出 `Version` 常量，当前为 `v0.3.0`。
+输出 `Version` 常量，当前为 `v0.4.0`。
 
 > GitHub Actions 构建时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖该值，故 release 二进制的版本号对应 git tag。`go install` / `go run` 场景下为源码常量值。
 
@@ -189,13 +328,18 @@ zzauto version
 ## 示例
 
 ```sh
-zzauto version                          # v0.3.0
-zzauto                                  # 等同 serve
-zzauto serve                            # 默认 127.0.0.1:8788，aiclibridge 不可达时自动安装，并校验 gh 已装已登录
+zzauto version                          # v0.4.0
+zzauto                                  # 打印 usage（等同 -h，v0.4.0 起不再默认 serve）
+zzauto start                            # 后台启动 daemon（推荐生产用法）
+zzauto status                           # 查看 daemon 状态
+zzauto stop                             # 停止 daemon
+zzauto restart                          # 重启 daemon
+zzauto serve                            # 前台启动（开发调试），aiclibridge 不可达时自动检测/启动或安装，并校验 gh 已装已登录
 zzauto serve --listen 0.0.0.0:8788      # 监听所有网卡
-zzauto serve --no-auto-install          # 跳过 aiclibridge 自动安装，仅提示
-ZZAUTO_LISTEN=0.0.0.0:8788 zzauto serve # 用环境变量覆盖
-ZZAUTO_ROLE_MODEL_GENERATOR=gpt-4o zzauto serve  # 用 env 覆盖 Generator 角色模型
+zzauto serve --no-auto-install          # 跳过 aiclibridge 自动安装/启动，仅提示
+zzauto start --listen 0.0.0.0:8788      # 后台启动并改监听地址
+ZZAUTO_LISTEN=0.0.0.0:8788 zzauto start # 用环境变量覆盖（daemon 子进程继承 env）
+ZZAUTO_ROLE_MODEL_GENERATOR=gpt-4o zzauto start  # 用 env 覆盖 Generator 角色模型
 zzauto upgrade                          # 升级到最新 release，并尝试同步升级 aiclibridge
 zzauto uninstall                        # 卸载（保留项目数据）
 ```
@@ -206,7 +350,10 @@ zzauto uninstall                        # 卸载（保留项目数据）
 
 | 文件 | 职责 |
 | --- | --- |
-| `cmd/zzauto/main.go` | CLI 入口与子命令分发 |
+| `cmd/zzauto/main.go` | CLI 入口与子命令分发（serve/start/stop/restart/status/upgrade/uninstall/version） |
+| `internal/daemon/daemon.go` | `start`/`stop`/`restart`/`status` 实现与 PID 文件管理（v0.4.0） |
+| `internal/daemon/daemon_unix.go` | Unix 分支：`setsid` detach + SIGTERM/SIGKILL（v0.4.0） |
+| `internal/daemon/daemon_windows.go` | Windows 分支：`CREATE_NEW_PROCESS_GROUP` + `taskkill`（v0.4.0） |
 | `internal/installer/installer.go` | `uninstall` / `upgrade` 实现 |
 | `internal/config/config.go` | `serve` 加载的配置 |
 | `internal/ui/handler.go` | `serve` 暴露的 HTTP 路由 |

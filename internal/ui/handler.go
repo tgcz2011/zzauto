@@ -253,6 +253,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings/models", h.handleGetModels)
 	mux.HandleFunc("PUT /api/settings/models", h.handlePutModels)
 
+	// aicli 模型列表（用于 Settings 页 model 下拉）
+	mux.HandleFunc("GET /api/aicli/models", h.handleAicliModels)
+
 	// stats 代理
 	mux.HandleFunc("GET /api/stats/usage", h.handleStatsUsage)
 	mux.HandleFunc("GET /api/stats/summary", h.handleStatsSummary)
@@ -783,6 +786,18 @@ func (h *Handler) handlePutModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAicliModels 代理 aiclibridge /v1/models，供 Settings 页 model 下拉选择。
+func (h *Handler) handleAicliModels(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	resp, err := h.aicli.Models(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ===== stats 代理 =====

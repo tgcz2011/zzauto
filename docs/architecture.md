@@ -76,6 +76,13 @@ zzauto 是多层 agent 协作的 AI 自主编程平台，采用**文档驱动 + 
 │   AuthStatus（未登录提示 gh auth login 退出 1）                  │
 │   Repos（gh repo list --json，供 UI 新建项目弹窗）                │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│            daemon 管理 (internal/daemon)  v0.4.0                 │
+│   start/stop/restart/status 子命令                                │
+│   fork zzauto serve 子进程脱离终端（Unix setsid / Win NEW_PGRP） │
+│   PID 文件 ~/.zzauto/zzauto.pid + 日志 ~/.zzauto/zzauto.log      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 分层职责：
@@ -89,6 +96,7 @@ zzauto 是多层 agent 协作的 AI 自主编程平台，采用**文档驱动 + 
 - **aicli 客户端层**：HTTP 调用 aiclibridge，统一 AI 调用入口。v0.3.0 扩展 `ChatWithModel`/`AskWithModel`/`SetModel`/`Model`、`RunStream`（SSE）/`GetRun`、stats 系列（`Usage`/`Prices`/`Summary`/`Concurrency`）。
 - **gittor 隔离层**：git CLI 封装，所有 git 操作唯一入口。
 - **ghcli 层（v0.3.0 新增）**：`internal/ghcli` 封装 GitHub CLI 的检测/安装提示/auth 状态/仓库列表，是 serve 启动检查与 UI 仓库下拉的数据来源。
+- **daemon 层（v0.4.0 新增）**：`internal/daemon` 提供 zzauto 自身后台 daemon 管理（`Start`/`Stop`/`Restart`/`Status`），fork `zzauto serve` 子进程脱离终端，PID 文件 + 日志重定向，是 `zzauto start`/`stop`/`restart`/`status` 子命令的实现。
 
 ---
 
@@ -303,6 +311,49 @@ updated_at: 2026-07-04T12:00:00Z
 
 ---
 
+## daemon 管理（v0.4.0）
+
+`internal/daemon/` 提供 zzauto 自身后台 daemon 管理，是 `zzauto start`/`stop`/`restart`/`status` 子命令的实现。daemon 子进程实质是 `zzauto serve`，只是 fork 出去脱离终端、PID 与日志落到固定路径，便于生产环境长期运行（terminal 关闭后 daemon 仍在）。
+
+### 文件布局
+
+| 文件 | 职责 |
+| --- | --- |
+| `internal/daemon/daemon.go` | 跨平台核心：`Start`/`Stop`/`Restart`/`Status`、PID 文件读写、健康存活检查、配置目录管理 |
+| `internal/daemon/daemon_unix.go` | Unix 分支（`//go:build !windows`）：`detach` 用 `SysProcAttr{Setsid: true}` 脱离控制终端；`processAlive` 用 `kill(pid, 0)`；`signalProcess` 用 `os.FindProcess.Signal`；`termSignal=SIGTERM`、`killSignal=SIGKILL` |
+| `internal/daemon/daemon_windows.go` | Windows 分支（`//go:build windows`）：`detach` 用 `CreationFlags: CREATE_NEW_PROCESS_GROUP \| DETACHED_PROCESS`；`processAlive` 用 `tasklist /FI "PID eq <pid>"`；`signalProcess` 用 `taskkill /PID <pid> /T /F`；`termSignal`/`killSignal` 均 `os.Kill`（无优雅 SIGTERM 等价物） |
+
+### 路径约定
+
+- PID 文件：`~/.zzauto/zzauto.pid`（内容由 `pidFilePath()` 返回，测试可覆写该包变量注入临时路径）。
+- 日志文件：`~/.zzauto/zzauto.log`（追加模式，daemon 子进程的 stdout/stderr 重定向到此）。
+- 配置目录：`~/.zzauto/`，由 `ensureDir()` 创建（权限 0o755）。
+
+### 核心函数
+
+- `Start(serveArgs []string) error`：
+  1. 先 `Status()` 检查是否已有 daemon 在运行，在运行则报错。
+  2. `ensureDir()` 建 `~/.zzauto/`；打开日志文件（追加）。
+  3. `os.Executable()` 获取当前二进制路径，构造 `exec.Command(exe, append([]string{"serve"}, serveArgs...)...)`。
+  4. 平台 `detach(cmd)` 设置脱离终端的 `SysProcAttr`；`cmd.Stdin=nil`、`cmd.Stdout`/`cmd.Stderr` 重定向到日志文件。
+  5. `cmd.Start()` 启动子进程，立即关闭父进程持有的日志句柄。
+  6. 等待 500ms 后 `processAlive(pid)` 验活，不存活报「启动后立即退出」。
+  7. 写 PID 文件，打印 `daemon 已启动 (PID=<pid>)`。
+- `Stop() error`：读 PID → `processAlive` 验活（不存活清理残留 PID 文件）→ 发 SIGTERM / `taskkill` → 每 100ms 轮询、最长 5s → 仍存活发 SIGKILL / 再次 `taskkill` → 清理 PID 文件。
+- `Restart(serveArgs []string) error`：先 `Stop()`（「未在运行」仅警告不终止），再 `Start(serveArgs)`。
+- `Status() (running bool, pid int, listen string, err error)`：读 PID 文件；不存在 → 未运行；`processAlive` 不存活 → 清理残留 PID 文件并返回未运行；存活 → 返回 `running=true, pid=<pid>`。
+
+### 设计要点
+
+- **PID 文件唯一真源**：daemon 是否在运行以 `~/.zzauto/zzauto.pid` + `processAlive(pid)` 双重判定为准，避免误判。残留 PID 文件（进程已退出）会被自动清理。
+- **平台隔离**：Unix 与 Windows 的 detach / 信号 / 进程查询差异收口在 `daemon_unix.go` / `daemon_windows.go`，`daemon.go` 只写跨平台逻辑。
+- **子进程即 serve**：daemon 不引入新的服务循环，子进程就是 `zzauto serve`，启动顺序（aiclibridge 检测/gh 检查/HTTP 服务）完全一致。daemon 化只解决「脱离终端 + PID/日志管理」。
+- **测试友好**：`pidFilePath`、`logFilePath`、`processAlive`、`signalProcess`、`termSignal`/`killSignal` 均为包级变量，测试可覆写注入临时路径与 fake 信号。`daemon_test.go` 覆盖 PID 文件读写与 Status 逻辑（不实际 fork）。
+
+> CLI 子命令行为与退出码详见 [cli.md](./cli.md) 的 `start`/`stop`/`restart`/`status` 章节。
+
+---
+
 ## gittor 隔离层
 
 `internal/gittor/gittor.go` 封装所有 git 操作（init/add/commit/push/status），使用 `git` CLI（`os/exec`）而非 `gh api`，避免频率限制。其他 agent 不直接碰 git，只通过 `GittorClient` 接口请求，确保 git 操作上下文隔离。
@@ -363,18 +414,22 @@ agent 通过 bus 发布事件但不阻塞——订阅者 channel 满即丢弃，
 
 | 文件 | 职责 |
 | --- | --- |
-| `cmd/zzauto/main.go` | CLI 入口，子命令分发与 serve 装配（含 gh 启动检查） |
+| `cmd/zzauto/main.go` | CLI 入口，子命令分发（serve/start/stop/restart/status/upgrade/uninstall/version）与 serve 装配（含 gh 启动检查） |
 | `internal/orchestrator/orchestrator.go` | 编排器与循环 |
 | `internal/registry/registry.go` | 组件装配（RegisterAgents 接收 roleModels） |
 | `internal/agents/*.go` | 9 个 agent 实现与接口/schema/哨兵错误 + RunWithTracking |
 | `internal/workspace/*.go` | 工作区与文档协议 |
 | `internal/eventbus/eventbus.go` | 事件总线（含 agent_run_event） |
-| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Chat/Ask/AskWithModel/RunStream/GetRun） |
+| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Chat/Ask/AskWithModel/RunStream/GetRun/Models） |
+| `internal/aicli/bootstrap.go` | `EnsureInstalled`（Health → lookPath → start daemon / install+start）+ `StartDaemon` + `UpgradeAiclibridge`（v0.4.0 修复） |
 | `internal/aicli/stats.go` | aiclibridge 统计端点（Usage/Prices/Summary/Concurrency） |
 | `internal/aicli/runs.go` | aiclibridge run SSE 流与详情 |
 | `internal/gittor/gittor.go` | git 隔离层 |
-| `internal/ui/handler.go` | HTTP API 与 SSE（含 projects/gh/settings/stats/runs 路由） |
+| `internal/ui/handler.go` | HTTP API 与 SSE（含 projects/gh/settings/stats/runs/aicli/models 路由） |
 | `internal/installer/installer.go` | 自卸载与自升级 |
 | `internal/config/config.go` | 配置加载（含 RoleModels + Save） |
 | `internal/ghcli/ghcli.go`（v0.3.0） | gh CLI 检测/安装提示/auth 状态/仓库列表 |
 | `internal/projects/registry.go`（v0.3.0） | 多项目 Registry 与 project.json 元数据 |
+| `internal/daemon/daemon.go`（v0.4.0） | zzauto 自身 daemon 管理（Start/Stop/Restart/Status + PID 文件） |
+| `internal/daemon/daemon_unix.go`（v0.4.0） | Unix 分支：setsid detach + SIGTERM/SIGKILL |
+| `internal/daemon/daemon_windows.go`（v0.4.0） | Windows 分支：CREATE_NEW_PROCESS_GROUP + taskkill |

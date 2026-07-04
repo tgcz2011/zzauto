@@ -236,3 +236,25 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any) ([]b
 	}
 	return data, nil
 }
+
+// ModelsResp 对应 aiclibridge /v1/models 响应（OpenAI 兼容格式）。
+type ModelsResp struct {
+	Data []ModelInfo `json:"data"`
+}
+
+// ModelInfo 单个模型信息。
+type ModelInfo struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	OwnedBy string `json:"owned_by"`
+}
+
+// Models 拉取 aiclibridge 当前可用的所有模型列表。
+// 用于 Settings 页 model 字段下拉选择。
+func (c *Client) Models(ctx context.Context) (*ModelsResp, error) {
+	var resp ModelsResp
+	if err := c.getJSON(ctx, "/v1/models", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
