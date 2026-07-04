@@ -1,6 +1,6 @@
 # CLI 命令参考
 
-zzauto 是单二进制 CLI，主入口在 `cmd/zzauto/main.go`，版本号常量 `Version = "v0.1.0"`。
+zzauto 是单二进制 CLI，主入口在 `cmd/zzauto/main.go`，版本号常量 `Version = "v0.3.0"`。
 
 ## 用法
 
@@ -46,17 +46,19 @@ zzauto              # 等同 serve
 
 1. 解析 flag；`config.Load()` 加载 `zzauto.yaml` + 环境变量；`--listen` 非空则覆盖 `cfg.Listen`。
 2. 创建事件总线 `eventbus.New()`。
-3. `workspace.NewProject(cfg.WorkspaceDir)` 生成新 projectID 并创建工作区，`EnsureDirs()` 建目录。
+3. `projects.New(cfg.WorkspaceDir)` 创建项目注册表（多项目管理）。
 4. **aiclibridge 健康检查**：`aicli.New(cfg.AicliAddr, cfg.AicliKey).Health(ctx)`（5 秒超时）。
    - 可达：继续启动。
    - 不可达且 `--no-auto-install=true`：打印日志与安装提示，`os.Exit(1)` 退出。
    - 不可达且 `--no-auto-install=false`（默认）：调用 `aicli.EnsureInstalled` 自动安装（macOS/Linux 走 `curl -fsSL ... | sh`，Windows 走 `irm ... | iex`），安装后每 2 秒轮询健康检查、最长等待 30 秒。成功后继续启动；失败时打印失败原因与手动安装命令并以 `os.Exit(1)` 退出。
-5. 创建 UI handler，把 `handler.AskUser` 适配为 `agents.AskFunc`（供 Asker 提问）。
-6. `registry.BuildOrchestrator` 装配编排器：创建 aicli 客户端、gittor、`gitClient.EnsureRepo` 初始化 git 仓库、注册全部 9 个 agent。
-7. 注册 HTTP 路由：`GET /healthz`（返回 `zzauto running`）+ UI 全部路由。
-8. `signal.NotifyContext` 监听 `SIGINT`/`SIGTERM`，用于取消 context。
-9. 后台 goroutine 执行 `orch.Run(runCtx)`；主 goroutine `http.ListenAndServe(cfg.Listen, mux)`。
-10. 成功启动打印 `zzauto v0.1.0 监听 <addr>`。
+5. **gh CLI 检查（v0.3.0 新增）**：`ghcli.EnsureInstalled()` 用 `exec.LookPath("gh")` 检测；未装则按平台打印安装命令（macOS `xcode-select --install` / `brew install gh`、Linux `apt`/`dnf`/`pacman`、Windows `winget`/`choco`）并 `os.Exit(1)`。
+6. **gh auth 检查（v0.3.0 新增）**：`ghcli.AuthStatus(ctx)` 执行 `gh auth status`；未登录则打印 `gh auth login` 提示并 `os.Exit(1)`；命令本身异常同样退出 1。
+7. 创建 UI handler，持 `projects.Registry` 与 `cfg`（编排器按需在 `handleStartProject` 中装配）。
+8. 注册 HTTP 路由：`GET /healthz`（返回 `zzauto running`）+ UI 全部路由（v0.2.0 路由 + v0.3.0 新增 17 路由：`/api/projects/*`、`/api/gh/*`、`/api/settings/models`、`/api/stats/*`、`/api/projects/{id}/runs/*`）。
+9. `http.ListenAndServe(cfg.Listen, mux)` 阻塞主 goroutine。
+10. 成功启动打印 `zzauto v0.3.0 监听 <addr>`。
+
+> v0.3.0 起 serve 不再启动时 `BuildOrchestrator`；编排器在 UI 选中项目点「启动编排」时按需 `POST /api/projects/{id}/start` 装配，见 [workflow.md](./workflow.md) 的「按需启动编排」一节。
 
 ### 退出码
 
@@ -64,9 +66,9 @@ zzauto              # 等同 serve
 - 工作区目录创建失败：`log.Fatalf`，非 0。
 - aiclibridge 不可达且 `--no-auto-install=true`：`os.Exit(1)`。
 - aiclibridge 自动安装失败（30 秒健康轮询未通过或安装脚本出错）：`os.Exit(1)`。
-- 编排器装配失败（如 git 仓库初始化失败）：`log.Fatalf`，非 0。
+- gh CLI 未安装（v0.3.0）：`os.Exit(1)`（stderr 打印平台安装命令）。
+- gh CLI 未登录（v0.3.0）：`os.Exit(1)`（stderr 打印 `gh auth login` 提示）。
 - HTTP 服务退出：`log.Fatalf`，非 0。
-- 收到 `SIGINT`/`SIGTERM`：context 取消，编排器退出，HTTP 服务随后退出。
 
 ### HTTP 路由（serve 暴露）
 
@@ -76,13 +78,29 @@ zzauto              # 等同 serve
 | `GET /static/` | 静态资源（app.js / style.css） |
 | `GET /healthz` | 健康检查，返回 `zzauto running` |
 | `GET /api/state` | 流程状态（9 agent 的 pending/running/done/failed） |
-| `GET /api/docs/{name}` | 读取文档（desire/need/spec/deal/task），返回 raw/body/meta |
-| `POST /api/input` | 提交用户原始需求，写入 `input.md` |
+| `GET /api/docs/{name}` | 读取文档（desire/need/spec/deal/task），返回 raw/body/meta（按当前选中项目） |
+| `POST /api/input` | 提交用户原始需求，写入 `input.md`（按当前选中项目） |
 | `GET /api/asks` | 待回答问题列表 |
 | `POST /api/ask/{id}` | 回答指定问题 |
 | `POST /api/github` | 配置 GitHub（内存更新） |
 | `GET /api/config` | 读取配置（token 脱敏） |
-| `GET /api/events` | SSE 事件流 |
+| `GET /api/events` | SSE 事件流（含 agent_run_event） |
+| `GET /api/projects` | 项目列表 + 当前选中 ID（v0.3.0） |
+| `POST /api/projects` | 创建项目（name/repo/branch），自动选中（v0.3.0） |
+| `GET /api/projects/{id}` | 单项目元数据（v0.3.0） |
+| `DELETE /api/projects/{id}` | 删除项目（同时停止其运行中编排器）（v0.3.0） |
+| `POST /api/projects/{id}/input` | 写入指定项目的 input.md（v0.3.0） |
+| `POST /api/projects/{id}/start` | 按需装配并启动该项目编排器（v0.3.0） |
+| `POST /api/projects/{id}/select` | 切换当前选中项目（v0.3.0） |
+| `GET /api/gh/status` | gh CLI 安装与登录状态（v0.3.0） |
+| `GET /api/gh/repos` | gh repo list 仓库列表（未登录 401）（v0.3.0） |
+| `GET /api/settings/models` | 读取 role_models 与默认模型（v0.3.0） |
+| `PUT /api/settings/models` | 更新 role_models 并落盘 zzauto.yaml（v0.3.0） |
+| `GET /api/stats/usage` | 代理 aiclibridge /v1/stats/usage（v0.3.0） |
+| `GET /api/stats/summary` | 代理 aiclibridge /v1/stats/summary（v0.3.0） |
+| `GET /api/stats/concurrency` | 代理 aiclibridge /v1/stats/concurrency（v0.3.0） |
+| `GET /api/projects/{id}/runs` | 该项目的 run 摘要列表（v0.3.0） |
+| `GET /api/projects/{id}/runs/{rid}` | 该项目指定 run 的完整事件时间线（v0.3.0） |
 
 ---
 
@@ -158,7 +176,7 @@ zzauto version
 
 ### 行为
 
-输出 `Version` 常量，当前为 `v0.1.0`。
+输出 `Version` 常量，当前为 `v0.3.0`。
 
 > GitHub Actions 构建时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖该值，故 release 二进制的版本号对应 git tag。`go install` / `go run` 场景下为源码常量值。
 
@@ -171,12 +189,13 @@ zzauto version
 ## 示例
 
 ```sh
-zzauto version                          # v0.1.0
+zzauto version                          # v0.3.0
 zzauto                                  # 等同 serve
-zzauto serve                            # 默认 127.0.0.1:8788，aiclibridge 不可达时自动安装
+zzauto serve                            # 默认 127.0.0.1:8788，aiclibridge 不可达时自动安装，并校验 gh 已装已登录
 zzauto serve --listen 0.0.0.0:8788      # 监听所有网卡
 zzauto serve --no-auto-install          # 跳过 aiclibridge 自动安装，仅提示
 ZZAUTO_LISTEN=0.0.0.0:8788 zzauto serve # 用环境变量覆盖
+ZZAUTO_ROLE_MODEL_GENERATOR=gpt-4o zzauto serve  # 用 env 覆盖 Generator 角色模型
 zzauto upgrade                          # 升级到最新 release，并尝试同步升级 aiclibridge
 zzauto uninstall                        # 卸载（保留项目数据）
 ```

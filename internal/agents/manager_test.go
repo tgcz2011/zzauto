@@ -49,7 +49,7 @@ func newManagerTestWorkspace(t *testing.T, skip string) *workspace.Workspace {
 
 // TestManager_Name 验证 Name 返回 "manager"。
 func TestManager_Name(t *testing.T) {
-	m := NewManager()
+	m := NewManager("")
 	if got := m.Name(); got != "manager" {
 		t.Errorf("Name() = %q, want %q", got, "manager")
 	}
@@ -65,12 +65,12 @@ func TestManager_Run_Success(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	m := NewManager()
+	m := NewManager("")
 	if err := m.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
 
-	events := drainEvents(ch)
+	events := filterLifecycleEvents(drainEvents(ch))
 
 	// 断言 AI 被调用，system prompt 正确，user 上下文包含四份文档
 	if !ai.called {
@@ -145,7 +145,7 @@ func TestManager_Run_DocMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	m := NewManager()
+	m := NewManager("")
 	err := m.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望缺失文档返回错误，但返回 nil")
@@ -187,7 +187,7 @@ func TestManager_Run_AIError(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	m := NewManager()
+	m := NewManager("")
 	err := m.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望 AI 失败返回错误，但返回 nil")
@@ -218,7 +218,7 @@ func TestManager_Run_NilBus(t *testing.T) {
 	ai := &mockAI{resp: fakeTaskBody}
 	git := &mockGittor{}
 
-	m := NewManager()
+	m := NewManager("")
 	if err := m.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}

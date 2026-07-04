@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tgcz2011/zzauto/internal/agents"
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/config"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/workspace"
@@ -16,6 +17,26 @@ type mockAI struct{}
 
 func (m *mockAI) Ask(ctx context.Context, system, user string) (string, error) {
 	return "", nil
+}
+
+// AskWithModel 与 Ask 相同（mock 不区分模型）。
+func (m *mockAI) AskWithModel(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+
+// RunStream 立即回调一个空的 text 事件并返回空 runID。
+func (m *mockAI) RunStream(_ context.Context, _, _, _ string, onEvent func(aicli.RunEvent) error) (string, error) {
+	if onEvent != nil {
+		_ = onEvent(aicli.RunEvent{Type: "system", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "text", Content: "", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "result", RunID: "mock"})
+	}
+	return "mock", nil
+}
+
+// GetRun 返回空 RunDetail。
+func (m *mockAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
 }
 
 // mockGit 模拟 GittorClient，不做任何事。

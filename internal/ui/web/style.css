@@ -5,6 +5,11 @@ body {
     "Microsoft YaHei", sans-serif;
 }
 
+/* x-cloak：Alpine 初始化前隐藏未渲染的 x-show/x-data 节点，避免闪烁 */
+[x-cloak] {
+  display: none !important;
+}
+
 /* 文档查看器长内容换行 */
 pre {
   white-space: pre-wrap;
@@ -22,4 +27,18 @@ pre {
 }
 .overflow-auto::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 思考事件折叠态：截断长文本，展开后恢复 */
+pre.max-h-6 {
+  max-height: 1.5rem;
+  overflow: hidden;
+  position: relative;
+}
+pre.max-h-6::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.6));
 }

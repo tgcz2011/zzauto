@@ -29,6 +29,8 @@ const (
 	EventAskUser = "ask_user"
 	// EventLog 通用日志事件。
 	EventLog = "log"
+	// EventAgentRunEvent AI run 的单个 SSE 事件（思考/工具调用/文本等）。
+	EventAgentRunEvent = "agent_run_event"
 )
 
 // 订阅者 channel 缓冲大小。

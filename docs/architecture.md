@@ -12,21 +12,33 @@ zzauto 是多层 agent 协作的 AI 自主编程平台，采用**文档驱动 + 
 ┌─────────────────────────────────────────────────────────────────┐
 │                        浏览器 Web UI                             │
 │              (内嵌 index.html / app.js / style.css)              │
+│   4 页面 SPA：项目 / 设置 / 统计 / 任务面板                       │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ HTTP / SSE
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      HTTP API (internal/ui)                      │
-│  /  /static/  /api/state  /api/docs  /api/input  /api/asks       │
-│  /api/ask  /api/github  /api/config  /api/events(SSE) /healthz   │
+│  v0.2.0 路由：/ /static/ /api/state /api/docs /api/input /api/asks│
+│             /api/ask /api/github /api/config /api/events /healthz│
+│  v0.3.0 新增：/api/projects/* /api/gh/* /api/settings/models     │
+│             /api/stats/* /api/projects/{id}/runs/*               │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ 事件订阅/发布
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   事件总线 (internal/eventbus)                   │
 │        发布/订阅 channel，缓冲 256，非阻塞投递，SSE 推送           │
+│        v0.3.0 新增 agent_run_event 事件（run 流事件广播）         │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ 调度
+                            │ 调度（按需装配）
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│            项目注册表 (internal/projects)  v0.3.0                │
+│   Registry 持工作区根目录，List/Get/Create/Update/Delete         │
+│   每个项目 <rootDir>/projects/<id>/project.json 元数据           │
+│   UI 选中项目 → POST /api/projects/{id}/start 按需装配 orchestrator│
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ 按需装配
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   编排器 (internal/orchestrator)                  │
@@ -39,31 +51,44 @@ zzauto 是多层 agent 协作的 AI 自主编程平台，采用**文档驱动 + 
 ┌──────────────┐   ┌──────────────────────┐   ┌──────────────────┐
 │ workspace    │   │ aicli 客户端          │   │ gittor 隔离层     │
 │ 文档协议+目录 │   │ (internal/aicli)      │   │ (internal/gittor) │
-│ desire/need/ │   │ OpenAI/Anthropic 兼容 │   │ git CLI 封装      │
-│ spec/deal/   │   └──────────┬───────────┘   │ token 不落盘      │
-│ task/reports │              │ HTTP            └────────┬─────────┘
-└──────────────┘              ▼                         │ git CLI
-                  ┌──────────────────────┐              ▼
-                  │  aiclibridge (外部)   │         远端仓库
-                  │  本地 AI 网关 HTTP    │       (GitHub 等)
+│ desire/need/ │   │ Chat/Ask/AskWithModel │   │ git CLI 封装      │
+│ spec/deal/   │   │ RunStream SSE / GetRun│   │ token 不落盘      │
+│ task/reports │   │ Usage/Summary/Stats   │   └────────┬─────────┘
+│ runs/<agent>/│   └──────────┬───────────┘            │ git CLI
+└──────────────┘              │ HTTP                   │
+                  ┌──────────────────────┐             ▼
+                  │  aiclibridge (外部)   │       远端仓库
+                  │  本地 AI 网关 HTTP    │     (GitHub 等)
                   │  /v1/chat/completions │
                   │  /v1/messages         │
+                  │  /v1/runs (SSE)       │
+                  │  /v1/runs/{id}        │
+                  │  /v1/stats/*          │
                   │  /healthz             │
                   └──────────┬───────────┘
                              │
                              ▼
                        各 AI 后端
+
+┌─────────────────────────────────────────────────────────────────┐
+│              gh CLI 集成 (internal/ghcli)  v0.3.0                │
+│   serve 启动时 EnsureInstalled（未装按平台打印命令退出 1）         │
+│   AuthStatus（未登录提示 gh auth login 退出 1）                  │
+│   Repos（gh repo list --json，供 UI 新建项目弹窗）                │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 分层职责：
 
-- **UI 层**：embed 进单二进制的 Web UI，SSE 实时推送 agent 事件，Asker 交互问答经浏览器完成。
-- **HTTP API 层**：REST 接口 + SSE 端点，桥接 UI 与编排器/工作区。
-- **事件总线层**：发布/订阅解耦，agent 生命周期与文档更新事件广播给订阅者。
+- **UI 层**：embed 进单二进制的 Web UI，4 页面 SPA（项目/设置/统计/任务面板），SSE 实时推送 agent 事件，Asker 交互问答经浏览器完成。
+- **HTTP API 层**：REST 接口 + SSE 端点，桥接 UI 与编排器/工作区。v0.3.0 新增 17 路由覆盖项目/gh/settings/stats/runs。
+- **事件总线层**：发布/订阅解耦，agent 生命周期与文档更新事件广播给订阅者；v0.3.0 新增 `agent_run_event` 类型用于广播 run 流事件。
+- **项目注册表层（v0.3.0 新增）**：`internal/projects` 的 Registry 管理多项目元数据（project.json），UI 切换项目时动态构造 workspace；编排器不再启动时全局装配，改为按项目按需装配。
 - **编排器层**：固定流程状态机 + 两个循环（讨论、评估），哨兵 error 驱动循环继续/终止。
-- **workspace 层**：项目目录与文档协议，agent 间通过文件系统传递上下文。
-- **aicli 客户端层**：HTTP 调用 aiclibridge，统一 AI 调用入口。
+- **workspace 层**：项目目录与文档协议，agent 间通过文件系统传递上下文。v0.3.0 在项目目录下新增 `runs/<agent>/<runID>.json` 持久化 run 事件流。
+- **aicli 客户端层**：HTTP 调用 aiclibridge，统一 AI 调用入口。v0.3.0 扩展 `ChatWithModel`/`AskWithModel`/`SetModel`/`Model`、`RunStream`（SSE）/`GetRun`、stats 系列（`Usage`/`Prices`/`Summary`/`Concurrency`）。
 - **gittor 隔离层**：git CLI 封装，所有 git 操作唯一入口。
+- **ghcli 层（v0.3.0 新增）**：`internal/ghcli` 封装 GitHub CLI 的检测/安装提示/auth 状态/仓库列表，是 serve 启动检查与 UI 仓库下拉的数据来源。
 
 ---
 
@@ -140,6 +165,7 @@ zzauto 是多层 agent 协作的 AI 自主编程平台，采用**文档驱动 + 
 | `EventDocUpdate` | 文档被写入/更新 |
 | `EventAskUser` | 需要向用户提问（Asker 交互） |
 | `EventLog` | 通用日志事件 |
+| `EventAgentRunEvent`（v0.3.0） | AI run 单个 SSE 事件（thinking/text/tool_use/tool_result/result/error/system），含 run_id/event_type/content/tool_name/tool_input |
 
 `Event` 结构：`Type`、`Agent`、`Data any`、`Time`（零值时自动填充当前时间）。
 
@@ -163,6 +189,7 @@ UI 的 `/api/events` 端点订阅 bus，把事件序列化为 JSON 通过 SSE（
 
 ```
 <WorkspaceDir>/projects/<projectID>/
+  project.json        # v0.3.0 项目元数据（id/name/repo/branch/status/current_stage/...）
   input.md            # 用户通过 UI 提交的原始需求（带 frontmatter）
   desire.md           # Listener 产出
   need.md             # Asker 产出
@@ -177,10 +204,13 @@ UI 的 `/api/events` 端点订阅 bus，把事件序列化为 JSON 通过 SSE（
     generator.md      # Generator 的自评 report
     evaluated/
       generator.md    # Evaluator 通过后 report 移动到此
+  runs/               # v0.3.0：每个 agent 的 run 事件流
+    <agent>/
+      <runID>.json    # RunWithTracking 持久化的完整事件时间线
 ```
 
 - `projectID` 由 `GenerateProjectID()` 生成：`20060102-150405-<6位hex>`。
-- `EnsureDirs()` 创建 `projectDir`、`agents/`、`reports/`。
+- `EnsureDirs()` 创建 `projectDir`、`agents/`、`reports/`；`projects.Registry.Create` 额外建 `runs/` 与空 `input.md` 并写 `project.json`。
 
 ### 文档协议
 
@@ -207,7 +237,7 @@ updated_at: 2026-07-04T12:00:00Z
 
 ## aicli 客户端
 
-`internal/aicli/client.go` 封装 aiclibridge 的 HTTP 调用，满足 `agents.AIClient` 接口（鸭子类型，`Ask` 方法）。
+`internal/aicli/client.go` 封装 aiclibridge 的 HTTP 调用，满足 `agents.AIClient` 接口（`Ask` / `AskWithModel` / `RunStream` / `GetRun`）。
 
 - **默认模型**：`claude/anthropic/claude-sonnet-4.5`；**默认 max_tokens**：4096（Anthropic 接口）。
 - **HTTP 超时**：5 分钟（AI 推理较慢）。
@@ -215,10 +245,61 @@ updated_at: 2026-07-04T12:00:00Z
 - **OpenAI 兼容**：`Chat` 调 `/v1/chat/completions`。
 - **Anthropic 兼容**：`Messages` 调 `/v1/messages`。
 - **便捷方法**：`Ask(ctx, system, user)` 默认走 OpenAI 兼容接口（即 `Chat`），是 agent 实际使用的方法。
+- **每角色模型（v0.3.0）**：`ChatWithModel(ctx, model, system, user)` / `AskWithModel(ctx, model, system, user)` 用传入 model 覆盖本次请求模型，不修改客户端默认模型；`SetModel` / `Model` 读写默认模型。
+- **Run 流（v0.3.0，`runs.go`）**：`RunStream(ctx, model, system, user, onEvent)` 走 `POST /v1/runs` SSE 协议，按 `data: <json>\n\n` 帧解析 `RunEvent`（thinking/text/tool_use/tool_result/result/error/system）回调，返回最终 runID；`GetRun(ctx, runID)` GET `/v1/runs/{id}` 拉取完整事件时间线。
+- **Stats（v0.3.0，`stats.go`）**：`Usage(ctx)` / `Prices(ctx)` / `Summary(ctx)` / `Concurrency(ctx)` 分别代理 `/v1/stats/usage|prices|summary|concurrency`，是统计面板的数据源。
 - **鉴权**：`api_key` 非空时设置 `Authorization: Bearer <key>`。
 - 地址归一化：去掉 `http://`/`https://` 前缀与尾部斜杠，统一为 `host:port`。
 
 > aiclibridge 是外部本地 HTTP 服务，详见 [aiclibridge.md](./aiclibridge.md)。
+
+---
+
+## gh CLI 集成（v0.3.0）
+
+`internal/ghcli/ghcli.go` 封装 GitHub CLI（`gh`）的检测、安装提示、auth 状态、仓库列表。serve 启动时强制校验 gh 已装且已登录，是 v0.3.0 多项目与新建项目选仓库能力的基础。
+
+### 核心函数
+
+- `EnsureInstalled()`：`exec.LookPath("gh")`，未装返回含 `InstallHint()` 的错误。
+- `InstallHint()`：按 `runtime.GOOS` 返回 macOS（`xcode-select --install` / `brew install gh`）、Linux（`apt` / `dnf` / `pacman`）、Windows（`winget` / `choco`）的安装命令。
+- `AuthStatus(ctx)`：执行 `gh auth status`，退出码 0 视为已登录；非 0 退出码视为未登录（不返回 error）；命令本身异常返回 error。
+- `LoginHint()`：返回 `gh auth login` 提示多行字符串。
+- `Repos(ctx)`：执行 `gh repo list --json nameWithOwner,isPrivate,url,description --limit 100`，返回 `[]Repo`；未登录返回 `ErrNotAuthenticated` 哨兵。
+
+### 与 gittor 的关系
+
+- ghcli 不替代 gittor：Gittor 仍用纯 `git` CLI（不依赖 `gh api`）做 commit/push，避免频率限制；ghcli 仅用于启动校验与 UI 仓库下拉。
+- 详见 [gh-integration.md](./gh-integration.md)。
+
+---
+
+## 项目注册表（v0.3.0）
+
+`internal/projects/registry.go` 的 `Registry` 持工作区根目录，管理多项目元数据。每项目对应 `<rootDir>/projects/<id>/project.json`，UI 选中项目时由 `Handler.currentWS()` 动态构造 workspace。
+
+### ProjectMeta 字段
+
+| 字段 | 含义 |
+| --- | --- |
+| `ID` | `20060102-150405-<6位hex>`，由 `workspace.GenerateProjectID()` 生成 |
+| `Name` | UI 创建项目时填写的项目名 |
+| `Repo` | `owner/name` 形式（来自 gh repo list） |
+| `Branch` | 默认 `main` |
+| `CreatedAt` / `UpdatedAt` | 时间戳 |
+| `Status` | `pending` / `running` / `done` / `failed` |
+| `CurrentStage` | 当前 agent stage |
+
+### Registry 方法
+
+- `List()`：扫描 `projects/*/project.json`，按 `CreatedAt` 倒序返回。
+- `Get(id)`：读取单个项目元数据。
+- `Create(name, repo, branch)`：生成 ID、建项目目录与 `agents/reports/runs/` 子目录、写空 `input.md`、写 `project.json`。
+- `Update(meta)`：更新元数据并写回 `project.json`，自动刷新 `UpdatedAt`。
+- `Delete(id)`：删除整个项目目录。
+- `ProjectDir(id)`：返回项目目录路径，供 UI handler 定位 runs。
+
+详见 [multi-projects.md](./multi-projects.md)。
 
 ---
 
@@ -282,14 +363,18 @@ agent 通过 bus 发布事件但不阻塞——订阅者 channel 满即丢弃，
 
 | 文件 | 职责 |
 | --- | --- |
-| `cmd/zzauto/main.go` | CLI 入口，子命令分发与 serve 装配 |
+| `cmd/zzauto/main.go` | CLI 入口，子命令分发与 serve 装配（含 gh 启动检查） |
 | `internal/orchestrator/orchestrator.go` | 编排器与循环 |
-| `internal/registry/registry.go` | 组件装配 |
-| `internal/agents/*.go` | 9 个 agent 实现与接口/schema/哨兵错误 |
+| `internal/registry/registry.go` | 组件装配（RegisterAgents 接收 roleModels） |
+| `internal/agents/*.go` | 9 个 agent 实现与接口/schema/哨兵错误 + RunWithTracking |
 | `internal/workspace/*.go` | 工作区与文档协议 |
-| `internal/eventbus/eventbus.go` | 事件总线 |
-| `internal/aicli/client.go` | aiclibridge HTTP 客户端 |
+| `internal/eventbus/eventbus.go` | 事件总线（含 agent_run_event） |
+| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Chat/Ask/AskWithModel/RunStream/GetRun） |
+| `internal/aicli/stats.go` | aiclibridge 统计端点（Usage/Prices/Summary/Concurrency） |
+| `internal/aicli/runs.go` | aiclibridge run SSE 流与详情 |
 | `internal/gittor/gittor.go` | git 隔离层 |
-| `internal/ui/handler.go` | HTTP API 与 SSE |
+| `internal/ui/handler.go` | HTTP API 与 SSE（含 projects/gh/settings/stats/runs 路由） |
 | `internal/installer/installer.go` | 自卸载与自升级 |
-| `internal/config/config.go` | 配置加载 |
+| `internal/config/config.go` | 配置加载（含 RoleModels + Save） |
+| `internal/ghcli/ghcli.go`（v0.3.0） | gh CLI 检测/安装提示/auth 状态/仓库列表 |
+| `internal/projects/registry.go`（v0.3.0） | 多项目 Registry 与 project.json 元数据 |

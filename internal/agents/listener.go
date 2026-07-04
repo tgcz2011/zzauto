@@ -53,11 +53,13 @@ const listenerSystemPrompt = `你是 zzauto 多层 agent 编程平台中的 List
 //
 // 它读取工作区中的 input.md（用户通过 UI 提交），调用 AI 丰富需求
 // 与改进点，将结果以带 frontmatter 的形式写入 desire.md。
-type Listener struct{}
+type Listener struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewListener 创建一个 Listener 实例。
-func NewListener() *Listener {
-	return &Listener{}
+// NewListener 创建一个 Listener 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewListener(model string) *Listener {
+	return &Listener{model: model}
 }
 
 // Name 返回 agent 标识 "listener"。
@@ -92,7 +94,7 @@ func (l *Listener) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient
 	}
 
 	// 调用 AI 丰富需求与改进点，得到 desire.md 正文
-	body, err := ai.Ask(ctx, listenerSystemPrompt, userRequest)
+	body, _, err := RunWithTracking(ctx, ws, bus, ai, l.Name(), l.model, listenerSystemPrompt, userRequest)
 	if err != nil {
 		bus.Publish(eventbus.Event{
 			Type:  eventbus.EventAgentFailed,

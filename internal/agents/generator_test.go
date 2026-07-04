@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
@@ -35,6 +36,31 @@ func (m *mockGenAI) Ask(ctx context.Context, system, user string) (string, error
 		idx = len(m.responses) - 1
 	}
 	return m.responses[idx], nil
+}
+
+// AskWithModel 与 Ask 行为一致，model 参数仅作签名兼容。
+func (m *mockGenAI) AskWithModel(ctx context.Context, _, system, user string) (string, error) {
+	return m.Ask(ctx, system, user)
+}
+
+// RunStream 复用 Ask 的记录与响应逻辑，并通过 text 事件回传。
+// 因 agent 现走 RunWithTracking→RunStream，systems/users/calls 在此被填充。
+func (m *mockGenAI) RunStream(ctx context.Context, _, system, user string, onEvent func(aicli.RunEvent) error) (string, error) {
+	resp, err := m.Ask(ctx, system, user)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil {
+		_ = onEvent(aicli.RunEvent{Type: "system", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "text", Content: resp, RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "result", RunID: "mock"})
+	}
+	return "mock", nil
+}
+
+// GetRun 返回空 RunDetail。
+func (m *mockGenAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
 }
 
 // genInstruction 是测试用的指令文件内容。
@@ -71,7 +97,7 @@ func newGeneratorTestWorkspace(t *testing.T, writeInstr bool) *workspace.Workspa
 
 // TestGenerator_Name 验证 Name 返回 "generator"。
 func TestGenerator_Name(t *testing.T) {
-	g := NewGenerator()
+	g := NewGenerator("")
 	if got := g.Name(); got != "generator" {
 		t.Errorf("Name() = %q, want %q", got, "generator")
 	}
@@ -87,7 +113,7 @@ func TestGenerator_Run_Success(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	g := NewGenerator()
+	g := NewGenerator("")
 	if err := g.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -152,7 +178,8 @@ func TestGenerator_Run_Success(t *testing.T) {
 	}
 
 	// 事件序列：agent_start -> doc_update -> agent_done
-	events := drainEvents(ch)
+	// 注：agent_run_event 已被 filterLifecycleEvents 过滤。
+	events := filterLifecycleEvents(drainEvents(ch))
 	wantSeq := []string{
 		eventbus.EventAgentStart,
 		eventbus.EventDocUpdate,
@@ -188,7 +215,7 @@ func TestGenerator_Run_InstructionMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	g := NewGenerator()
+	g := NewGenerator("")
 	err := g.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望指令缺失返回错误，但返回 nil")
@@ -231,7 +258,7 @@ func TestGenerator_Run_CodeAIError(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	g := NewGenerator()
+	g := NewGenerator("")
 	err := g.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望 AI 失败返回错误，但返回 nil")
@@ -262,7 +289,7 @@ func TestGenerator_Run_NoCodeBlocks(t *testing.T) {
 	bus := eventbus.New()
 	defer bus.Close()
 
-	g := NewGenerator()
+	g := NewGenerator("")
 	if err := g.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -292,7 +319,7 @@ func TestGenerator_Run_NilBus(t *testing.T) {
 	ai := &mockGenAI{responses: []string{genCodeOutput, genSelfReview}}
 	git := &mockGittor{}
 
-	g := NewGenerator()
+	g := NewGenerator("")
 	if err := g.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}

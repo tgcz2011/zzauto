@@ -315,6 +315,26 @@ Gittor 提交需要 git 远程仓库配置：
 
 ---
 
+## 按需启动编排（v0.3.0）
+
+v0.3.0 起 serve 不再启动时全局装配 `BuildOrchestrator`，改为按项目按需装配：
+
+1. **创建项目**：UI 在「项目」页点「新建项目」，弹窗从 `GET /api/gh/repos` 拉取仓库下拉（gh repo list），填写 name/repo/branch，`POST /api/projects` 创建项目（`projects.Registry.Create` 生成 projectID、建目录、写 project.json）。
+2. **选中项目**：UI 点项目行 `POST /api/projects/{id}/select` 切换 `Handler.currentID`，v0.2.0 路由（`/api/state`、`/api/docs/{name}`、`/api/input`、`/api/asks`、`/api/ask/{id}`）按当前选中项目工作。
+3. **提交需求**：在项目详情页输入框提交需求，`POST /api/projects/{id}/input` 写入该项目的 `input.md`（带 frontmatter）。
+4. **启动编排**：点「启动编排」按钮，`POST /api/projects/{id}/start`：
+   - 校验项目存在且无运行中编排器（409 Conflict）；
+   - `workspace.New(cfg.WorkspaceDir, id)` 构造该项目 workspace，`EnsureDirs()` 建目录；
+   - `registry.BuildOrchestrator(cfg, ws, bus, askFunc)` 装配 9 agent（`cfg.RoleModels` 注入到各 agent）；
+   - 后台 goroutine 执行 `orch.Run(ctx)`，主请求立即返回 200；
+   - 编排器退出时（正常结束或出错）从 `Handler.orchs` map 移除。
+5. **观察流程**：UI 通过 `/api/state`（每 2 秒轮询）与 `/api/events`（SSE）实时查看 9 agent 流转与 `agent_run_event` 事件。
+6. **删除项目**：`DELETE /api/projects/{id}` 删除项目目录并停止其运行中编排器；若为当前选中项目则清空选中。
+
+> 与 v0.2.0 的差异：v0.2.0 启动 serve 时即创建单个 workspace 并装配全局 orchestrator；v0.3.0 改为多项目 Registry + 按需装配，使一份 serve 实例可管理多个并行项目（每个项目独立 orchestrator 与 workspace）。
+
+---
+
 ## 完整时序（一次成功交付）
 
 ```
@@ -344,5 +364,7 @@ Gittor 提交需要 git 远程仓库配置：
 | `internal/orchestrator/orchestrator.go` | 流程状态机与两个循环 |
 | `internal/agents/schema.go` | 文档 schema 与打勾前缀常量 |
 | `internal/agents/errors.go` | `ErrNoConsensus` / `ErrEvaluationFailed` 哨兵 |
-| `internal/ui/handler.go` | UI 介入点（`/api/input`、`AskUser`、`/api/github`） |
+| `internal/agents/agent.go` | `RunWithTracking`（v0.3.0，run 事件持久化与广播） |
+| `internal/ui/handler.go` | UI 介入点（`/api/input`、`AskUser`、`/api/github`、v0.3.0 项目/start/runs 路由） |
+| `internal/projects/registry.go`（v0.3.0） | 多项目 Registry 与 project.json 元数据 |
 | `internal/workspace/doc.go` | 阶段/状态/文档名常量与 frontmatter 解析 |

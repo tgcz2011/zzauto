@@ -22,10 +22,12 @@ import (
 // 工作，无法触达用户原始需求与上游讨论过程。
 //
 // MVP 采用单 Generator 模式：一次性实现指令中的所有任务。
-type Generator struct{}
+type Generator struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewGenerator 构造一个 Generator 实例。
-func NewGenerator() *Generator { return &Generator{} }
+// NewGenerator 构造一个 Generator 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewGenerator(model string) *Generator { return &Generator{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageGenerator 对应。
 func (g *Generator) Name() string { return workspace.StageGenerator }
@@ -101,7 +103,7 @@ func (g *Generator) Run(ctx context.Context, ws *workspace.Workspace, ai AIClien
 	}
 
 	// 3. 调用 AI 生成代码
-	output, err := ai.Ask(ctx, generatorSystemPrompt, instruction)
+	output, _, err := RunWithTracking(ctx, ws, bus, ai, g.Name(), g.model, generatorSystemPrompt, instruction)
 	if err != nil {
 		return g.fail(bus, fmt.Errorf("调用 AI 生成代码失败: %w", err))
 	}
@@ -115,7 +117,7 @@ func (g *Generator) Run(ctx context.Context, ws *workspace.Workspace, ai AIClien
 
 	// 5. 调用 AI 自评
 	codeSummary := buildCodeSummary(ws, writtenPaths)
-	selfReview, err := ai.Ask(ctx, selfReviewPrompt, codeSummary)
+	selfReview, _, err := RunWithTracking(ctx, ws, bus, ai, g.Name(), g.model, selfReviewPrompt, codeSummary)
 	if err != nil {
 		return g.fail(bus, fmt.Errorf("调用 AI 自评失败: %w", err))
 	}

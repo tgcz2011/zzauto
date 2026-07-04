@@ -25,6 +25,7 @@ import (
 // 内部创建 aicli 客户端与 gittor，初始化 git 仓库，注册全部 9 个 agent。
 // askFunc 为 Asker agent 的提问回调，为 nil 时 Asker 使用默认 askViaBus
 // （通过事件总线与 ask_reply.md 文件交互）。
+// 各 agent 使用的模型取自 cfg.RoleModels（key=stage 小写）。
 func BuildOrchestrator(cfg *config.Config, ws *workspace.Workspace, bus *eventbus.Bus, askFunc agents.AskFunc) (*orchestrator.Orchestrator, error) {
 	// 创建 aicli 客户端
 	aiClient := aicli.New(cfg.AicliAddr, cfg.AicliKey)
@@ -37,7 +38,7 @@ func BuildOrchestrator(cfg *config.Config, ws *workspace.Workspace, bus *eventbu
 
 	// 创建编排器并注册 agent
 	orch := orchestrator.New(cfg, ws, aiClient, gitClient, bus)
-	RegisterAgents(orch, askFunc)
+	RegisterAgents(orch, askFunc, cfg.RoleModels)
 	return orch, nil
 }
 
@@ -45,10 +46,10 @@ func BuildOrchestrator(cfg *config.Config, ws *workspace.Workspace, bus *eventbu
 //
 // 与 BuildOrchestrator 的区别：AI 与 git 客户端由调用方注入，便于测试使用
 // mock AI 与本地 bare 仓库。调用方需自行确保 git 仓库已初始化（如调用
-// gittor.EnsureRepo）。
-func BuildOrchestratorWithDeps(cfg *config.Config, ws *workspace.Workspace, bus *eventbus.Bus, ai agents.AIClient, git agents.GittorClient, askFunc agents.AskFunc) *orchestrator.Orchestrator {
+// gittor.EnsureRepo）。roleModels 为各 stage 配置的模型映射，可为 nil。
+func BuildOrchestratorWithDeps(cfg *config.Config, ws *workspace.Workspace, bus *eventbus.Bus, ai agents.AIClient, git agents.GittorClient, askFunc agents.AskFunc, roleModels map[string]string) *orchestrator.Orchestrator {
 	orch := orchestrator.New(cfg, ws, ai, git, bus)
-	RegisterAgents(orch, askFunc)
+	RegisterAgents(orch, askFunc, roleModels)
 	return orch
 }
 
@@ -60,14 +61,21 @@ func BuildOrchestratorWithDeps(cfg *config.Config, ws *workspace.Workspace, bus 
 //	→ Manager → Executor → Generator → Evaluator（评估循环）→ Gittor
 //
 // askFunc 为 nil 时 Asker 使用默认 askViaBus 实现。
-func RegisterAgents(orch *orchestrator.Orchestrator, askFunc agents.AskFunc) {
-	orch.Register(workspace.StageListener, agents.NewListener())
-	orch.Register(workspace.StageAsker, agents.NewAsker(askFunc))
-	orch.Register(workspace.StagePlanner, agents.NewPlanner())
-	orch.Register(workspace.StageDesigner, agents.NewDesigner())
-	orch.Register(workspace.StageEvaluator, agents.NewEvaluator())
-	orch.Register(workspace.StageManager, agents.NewManager())
-	orch.Register(workspace.StageExecutor, agents.NewExecutor())
-	orch.Register(workspace.StageGenerator, agents.NewGenerator())
-	orch.Register(workspace.StageGittor, agents.NewGittorAgent())
+// roleModels 为 stage→model 名映射，可为 nil 或缺某 stage（agent 用空模型，AI 走默认）。
+func RegisterAgents(orch *orchestrator.Orchestrator, askFunc agents.AskFunc, roleModels map[string]string) {
+	model := func(stage string) string {
+		if roleModels == nil {
+			return ""
+		}
+		return roleModels[stage]
+	}
+	orch.Register(workspace.StageListener, agents.NewListener(model(workspace.StageListener)))
+	orch.Register(workspace.StageAsker, agents.NewAsker(askFunc, model(workspace.StageAsker)))
+	orch.Register(workspace.StagePlanner, agents.NewPlanner(model(workspace.StagePlanner)))
+	orch.Register(workspace.StageDesigner, agents.NewDesigner(model(workspace.StageDesigner)))
+	orch.Register(workspace.StageEvaluator, agents.NewEvaluator(model(workspace.StageEvaluator)))
+	orch.Register(workspace.StageManager, agents.NewManager(model(workspace.StageManager)))
+	orch.Register(workspace.StageExecutor, agents.NewExecutor(model(workspace.StageExecutor)))
+	orch.Register(workspace.StageGenerator, agents.NewGenerator(model(workspace.StageGenerator)))
+	orch.Register(workspace.StageGittor, agents.NewGittorAgent(model(workspace.StageGittor)))
 }

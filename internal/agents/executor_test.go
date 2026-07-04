@@ -70,7 +70,7 @@ func newExecutorTestWorkspace(t *testing.T, skip string) *workspace.Workspace {
 
 // TestExecutor_Name 验证 Name 返回 "executor"。
 func TestExecutor_Name(t *testing.T) {
-	e := NewExecutor()
+	e := NewExecutor("")
 	if got := e.Name(); got != "executor" {
 		t.Errorf("Name() = %q, want %q", got, "executor")
 	}
@@ -87,7 +87,7 @@ func TestExecutor_Run_Success(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewExecutor()
+	e := NewExecutor("")
 	if err := e.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestExecutor_Run_TaskMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewExecutor()
+	e := NewExecutor("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望缺失 task.md 返回错误，但返回 nil")
@@ -225,7 +225,7 @@ func TestExecutor_Run_SpecMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewExecutor()
+	e := NewExecutor("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望缺失 spec.md 返回错误，但返回 nil")
@@ -249,7 +249,7 @@ func TestExecutor_Run_NilBus(t *testing.T) {
 	ai := &mockAI{}
 	git := &mockGittor{}
 
-	e := NewExecutor()
+	e := NewExecutor("")
 	if err := e.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}

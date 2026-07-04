@@ -67,7 +67,7 @@ func newDesignerTestWorkspace(t *testing.T, writeSpec, writePrevDeal, writeRevie
 
 // TestDesigner_Name 验证 Name 返回 "designer"。
 func TestDesigner_Name(t *testing.T) {
-	d := NewDesigner()
+	d := NewDesigner("")
 	if got := d.Name(); got != workspace.StageDesigner {
 		t.Errorf("Name() = %q, want %q", got, workspace.StageDesigner)
 	}
@@ -84,12 +84,12 @@ func TestDesigner_Run_FirstRound(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	d := NewDesigner()
+	d := NewDesigner("")
 	if err := d.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
 
-	events := drainEvents(ch)
+	events := filterLifecycleEvents(drainEvents(ch))
 
 	// 断言 AI 被调用，system prompt 正确
 	if !ai.called {
@@ -179,7 +179,7 @@ func TestDesigner_Run_RevisionWithReview(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	d := NewDesigner()
+	d := NewDesigner("")
 	if err := d.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestDesigner_Run_SpecMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	d := NewDesigner()
+	d := NewDesigner("")
 	err := d.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望 spec.md 缺失返回错误，但返回 nil")
@@ -272,7 +272,7 @@ func TestDesigner_Run_AIError(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	d := NewDesigner()
+	d := NewDesigner("")
 	err := d.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望 AI 失败返回错误，但返回 nil")
@@ -303,7 +303,7 @@ func TestDesigner_Run_NilBus(t *testing.T) {
 	ai := &mockAI{resp: fakeDealDraftBody}
 	git := &mockGittor{}
 
-	d := NewDesigner()
+	d := NewDesigner("")
 	if err := d.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestDesigner_Run_NilBus(t *testing.T) {
 
 // TestDesigner_BuildContext 验证上下文拼装逻辑覆盖各文档组合。
 func TestDesigner_BuildContext(t *testing.T) {
-	d := NewDesigner()
+	d := NewDesigner("")
 
 	// 仅 spec
 	got := d.buildContext("SPEC", "", false, "", false)

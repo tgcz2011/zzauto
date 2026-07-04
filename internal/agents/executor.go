@@ -21,10 +21,12 @@ import (
 // Executor 投喂的内容，无法触达用户的原始欲望与讨论过程。
 //
 // Executor 不调用 AI，一次性准备完指令即交付，符合 MVP 单 Generator 模式。
-type Executor struct{}
+type Executor struct {
+	model string // 保留字段以与其他 agent 构造签名一致；Executor 不调用 AI
+}
 
-// NewExecutor 构造一个 Executor 实例。
-func NewExecutor() *Executor { return &Executor{} }
+// NewExecutor 构造一个 Executor 实例。model 仅为签名一致性保留，本 agent 不调用 AI。
+func NewExecutor(model string) *Executor { return &Executor{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageExecutor 对应。
 func (e *Executor) Name() string { return workspace.StageExecutor }

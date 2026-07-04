@@ -16,10 +16,12 @@ import (
 // ADDED Requirements 结构），并写入 workspace。
 //
 // Planner 不与用户交互，仅做一次 AI 调用即可产出完整 spec。
-type Planner struct{}
+type Planner struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewPlanner 构造一个 Planner 实例。
-func NewPlanner() *Planner { return &Planner{} }
+// NewPlanner 构造一个 Planner 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewPlanner(model string) *Planner { return &Planner{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StagePlanner 对应。
 func (p *Planner) Name() string { return "planner" }
@@ -104,7 +106,7 @@ func (p *Planner) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient,
 	}
 
 	// 3. 调用 AI 生成 spec.md 正文
-	specBody, err := ai.Ask(ctx, plannerSystemPrompt, needContent)
+	specBody, _, err := RunWithTracking(ctx, ws, bus, ai, p.Name(), p.model, plannerSystemPrompt, needContent)
 	if err != nil {
 		failErr := fmt.Errorf("调用 AI 生成 spec 失败: %w", err)
 		publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{

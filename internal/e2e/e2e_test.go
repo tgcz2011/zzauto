@@ -8,6 +8,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/tgcz2011/zzauto/internal/agents"
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/config"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/gittor"
@@ -44,6 +47,54 @@ func (m *mockAI) Ask(_ context.Context, _, _ string) (string, error) {
 	resp := m.responses[m.idx]
 	m.idx++
 	return resp, nil
+}
+
+// AskWithModel 与 Ask 相同，model 参数仅作签名兼容（mock 不区分模型）。
+func (m *mockAI) AskWithModel(_ context.Context, _, _, _ string) (string, error) {
+	return m.Ask(context.Background(), "", "")
+}
+
+// RunStream 模拟 SSE 流：构造 system（含 run_id）+ text（content=下一条预设响应）
+// + result 三个事件回调 onEvent，返回 runID。
+// 与 Ask 共享同一递增索引，保证调用顺序与编排器实际 AI 调用次数一致。
+func (m *mockAI) RunStream(_ context.Context, _, _, _ string, onEvent func(aicli.RunEvent) error) (string, error) {
+	m.mu.Lock()
+	if m.idx >= len(m.responses) {
+		m.mu.Unlock()
+		return "", fmt.Errorf("mockAI 响应已耗尽（第 %d 次调用，超出预设 %d 条）", m.idx+1, len(m.responses))
+	}
+	resp := m.responses[m.idx]
+	m.idx++
+	m.mu.Unlock()
+
+	runID := mockRunID()
+	if onEvent != nil {
+		// system 事件：声明 runID
+		if err := onEvent(aicli.RunEvent{Type: "system", RunID: runID}); err != nil {
+			return runID, err
+		}
+		// text 事件：携带模型回答
+		if err := onEvent(aicli.RunEvent{Type: "text", Content: resp, RunID: runID}); err != nil {
+			return runID, err
+		}
+		// result 事件：结束标记
+		if err := onEvent(aicli.RunEvent{Type: "result", RunID: runID}); err != nil {
+			return runID, err
+		}
+	}
+	return runID, nil
+}
+
+// GetRun 返回空 RunDetail，e2e 测试不依赖此方法。
+func (m *mockAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
+}
+
+// mockRunID 生成 mock 用的随机 run id，避免不同调用间冲突。
+func mockRunID() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return "mock-" + hex.EncodeToString(b)
 }
 
 // hasGit 检查系统是否安装了 git 命令。
@@ -186,7 +237,7 @@ func TestE2EFullFlow(t *testing.T) {
 	bus := eventbus.New()
 	t.Cleanup(bus.Close)
 	cfg := config.Default()
-	orch := registry.BuildOrchestratorWithDeps(cfg, ws, bus, ai, gitClient, nil)
+	orch := registry.BuildOrchestratorWithDeps(cfg, ws, bus, ai, gitClient, nil, nil)
 
 	// 执行完整编排流程
 	if err := orch.Run(ctx); err != nil {

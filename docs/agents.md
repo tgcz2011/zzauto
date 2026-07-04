@@ -21,6 +21,24 @@ type Agent interface {
 
 事件约定：每个 agent 在执行前后发布 `agent_start` / `agent_done` / `agent_failed`，文档更新时发布 `doc_update`。
 
+### 每角色模型配置（v0.3.0）
+
+`AIClient` 接口在 v0.3.0 扩展为四方法：
+
+```go
+type AIClient interface {
+    Ask(ctx, system, user) (string, error)
+    AskWithModel(ctx, model, system, user) (string, error)
+    RunStream(ctx, model, system, user, onEvent) (runID string, error)
+    GetRun(ctx, runID) (*aicli.RunDetail, error)
+}
+```
+
+- 每个 agent 在构造时接收一个 `roleModel` 字符串（来自 `cfg.RoleModels[stage]`，未配置则为空串，AI 走默认模型）。
+- agent 调用 AI 时改用 `ai.AskWithModel(ctx, roleModel, system, user)`：传入空 model 由 aiclibridge 用默认模型；传入非空 model 覆盖本次请求。
+- `RunWithTracking` 辅助函数（`internal/agents/agent.go`）封装 RunStream + 事件持久化：流式调用 AI 时把每个 SSE 事件（thinking/text/tool_use/tool_result/result/error/system）通过 bus 发布 `agent_run_event`，并把完整事件列表写到 `<projectDir>/runs/<agent>/<runID>.json`，供任务面板展示。
+- 配置入口见 [settings.md](./settings.md) 与 [configuration.md](./configuration.md) 的 `role_models` / `ZZAUTO_ROLE_MODEL_<STAGE>` 段。
+
 ---
 
 ## 1. Listener 倾听者

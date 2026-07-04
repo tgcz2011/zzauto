@@ -11,19 +11,31 @@ import (
 
 	"github.com/tgcz2011/zzauto/internal/config"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
+	"github.com/tgcz2011/zzauto/internal/projects"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
 
 // newTestHandler 构造一个用于测试的 Handler 及其依赖。
+// 创建临时目录作为 workspace 根，注册一个 "test" 项目并设为当前选中，
+// 返回的 ws 与 handler.currentWS() 指向同一项目目录。
 func newTestHandler(t *testing.T) (*Handler, *eventbus.Bus, *workspace.Workspace) {
 	t.Helper()
 	bus := eventbus.New()
-	ws := workspace.New(t.TempDir(), "testproj")
+	tmpDir := t.TempDir()
+	reg := projects.New(tmpDir)
+	meta, err := reg.Create("test", "owner/repo", "main")
+	if err != nil {
+		t.Fatalf("reg.Create: %v", err)
+	}
+	cfg := config.Default()
+	cfg.WorkspaceDir = tmpDir
+	h := New(bus, reg, cfg)
+	h.setCurrent(meta.ID)
+	ws := workspace.New(tmpDir, meta.ID)
 	if err := ws.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
-	cfg := config.Default()
-	return New(bus, ws, cfg), bus, ws
+	return h, bus, ws
 }
 
 // TestInputWritesDoc 验证 POST /api/input 将需求写入 input.md 并附带 frontmatter。

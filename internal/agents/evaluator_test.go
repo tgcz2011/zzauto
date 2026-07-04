@@ -85,7 +85,7 @@ func newEvaluatorCodeWorkspace(t *testing.T) *workspace.Workspace {
 
 // TestEvaluator_Name 验证 Name 返回 "evaluator"。
 func TestEvaluator_Name(t *testing.T) {
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if got := e.Name(); got != "evaluator" {
 		t.Errorf("Name() = %q, want %q", got, "evaluator")
 	}
@@ -101,7 +101,7 @@ func TestEvaluator_Discussion_Consensus(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if err := e.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("共识时应返回 nil, got %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEvaluator_Discussion_NoConsensus(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if !errors.Is(err, ErrNoConsensus) {
 		t.Fatalf("未共识应返回 ErrNoConsensus, got %v", err)
@@ -228,7 +228,7 @@ func TestEvaluator_Discussion_DealMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("deal.md 缺失应返回错误")
@@ -262,7 +262,7 @@ func TestEvaluator_CodeEval_Pass(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if err := e.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("合格应返回 nil, got %v", err)
 	}
@@ -344,7 +344,7 @@ func TestEvaluator_CodeEval_Fail(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if !errors.Is(err, ErrEvaluationFailed) {
 		t.Fatalf("不合格应返回 ErrEvaluationFailed, got %v", err)
@@ -403,7 +403,7 @@ func TestEvaluator_ModeDetermination(t *testing.T) {
 	// 场景1：无 reports/generator.md → 讨论模式
 	w1 := newEvaluatorDiscussionWorkspace(t, true)
 	ai1 := &mockAI{resp: `{"consensus": true, "critique": ""}`}
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if err := e.Run(context.Background(), w1, ai1, &mockGittor{}, nil); err != nil {
 		t.Fatalf("场景1 运行失败: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestEvaluator_ModeDetermination(t *testing.T) {
 	// 场景2：有 generator.md 且无 evaluated/generator.md → 代码评估模式
 	w2 := newEvaluatorCodeWorkspace(t)
 	ai2 := &mockAI{resp: `{"pass": true, "issues": []}`}
-	e2 := NewEvaluator()
+	e2 := NewEvaluator("")
 	if err := e2.Run(context.Background(), w2, ai2, &mockGittor{}, nil); err != nil {
 		t.Fatalf("场景2 运行失败: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestEvaluator_ModeDetermination(t *testing.T) {
 		t.Fatalf("写入 evaluated/generator.md 失败: %v", err)
 	}
 	ai3 := &mockAI{resp: `{"consensus": true, "critique": ""}`}
-	e3 := NewEvaluator()
+	e3 := NewEvaluator("")
 	if err := e3.Run(context.Background(), w3, ai3, &mockGittor{}, nil); err != nil {
 		t.Fatalf("场景3 运行失败: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestEvaluator_JSONFaultTolerance(t *testing.T) {
 	bus := eventbus.New()
 	defer bus.Close()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if err := e.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("包裹的 JSON 应能解析, got %v", err)
 	}
@@ -475,7 +475,7 @@ func TestEvaluator_Discussion_AIError(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望 AI 失败返回错误")
@@ -508,7 +508,7 @@ func TestEvaluator_CodeEval_BadJSON(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	err := e.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("非法 JSON 应返回错误")
@@ -530,7 +530,8 @@ func TestEvaluator_CodeEval_BadJSON(t *testing.T) {
 		t.Errorf("非法 JSON 时 report 应留在原位: %v", statErr)
 	}
 
-	events := drainEvents(ch)
+	// 注：agent_run_event 已被 filterLifecycleEvents 过滤。
+	events := filterLifecycleEvents(drainEvents(ch))
 	if len(events) < 2 {
 		t.Fatalf("事件不足: %d", len(events))
 	}
@@ -545,7 +546,7 @@ func TestEvaluator_NilBus(t *testing.T) {
 	ai := &mockAI{resp: `{"consensus": true, "critique": ""}`}
 	git := &mockGittor{}
 
-	e := NewEvaluator()
+	e := NewEvaluator("")
 	if err := e.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}

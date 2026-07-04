@@ -12,14 +12,24 @@ aiclibridge 是独立部署的本地 HTTP 网关（默认监听 `127.0.0.1:8787`
 
 - **OpenAI 兼容**：`POST /v1/chat/completions`（请求体 `{model, messages:[{role,content}]}`，响应 `{choices:[{message:{content}}]}`）。
 - **Anthropic 兼容**：`POST /v1/messages`（请求体 `{model, max_tokens, system, messages:[{role,content}]}`，响应 `{content:[{type,text}]}`）。
+- **Run SSE 流（v0.3.0）**：`POST /v1/runs`（请求体 `{model, system, messages, stream:true}`，响应 `text/event-stream`，按 `data: <json>\n\n` 帧推送 `RunEvent`：thinking/text/tool_use/tool_result/result/error/system）。
+- **Run 详情（v0.3.0）**：`GET /v1/runs/{id}`，返回单个 run 的完整事件时间线（id/model/status/created_at/events）。
+- **统计端点（v0.3.0）**：
+  - `GET /v1/stats/usage`：各模型用量（prompt/completion/total tokens、requests、usd）+ 汇总。
+  - `GET /v1/stats/prices`：各模型每 1M token 定价。
+  - `GET /v1/stats/summary`：总览（total_requests/total_tokens/total_usd/uptime）。
+  - `GET /v1/stats/concurrency`：并发（active/queued/max）。
 - **健康检查**：`GET /healthz`，2xx 视为可达。
 - **鉴权**：`api_key` 非空时请求带 `Authorization: Bearer <key>`。
 
-zzauto 的 `internal/aicli/client.go` 封装了上述调用：
+zzauto 的 `internal/aicli/` 封装了上述调用：
 
 - 默认模型 `claude/anthropic/claude-sonnet-4.5`，默认 `max_tokens=4096`。
 - HTTP 客户端超时 5 分钟（AI 推理较慢）。
 - `Ask(ctx, system, user)` 是 agent 实际使用的便捷方法，默认走 OpenAI 兼容接口（即 `Chat`），满足 `agents.AIClient` 接口。
+- **每角色模型（v0.3.0）**：`ChatWithModel`/`AskWithModel` 用传入 model 覆盖本次请求；`SetModel`/`Model` 读写默认模型。
+- **Run 流（v0.3.0，`runs.go`）**：`RunStream` SSE 解析 + 回调，`GetRun` 拉取详情。
+- **Stats（v0.3.0，`stats.go`）**：`Usage`/`Prices`/`Summary`/`Concurrency` 四个方法对应四个端点。
 - 地址归一化：去掉 `http://`/`https://` 前缀与尾部斜杠。
 
 ---
@@ -135,7 +145,50 @@ zzauto serve
 
 ## 关于 agents 启用
 
-aiclibridge 侧负责配置各 AI 后端（模型路由、API key、并发等）。zzauto 侧的「agents 启用」是指编排器注册的 9 个 agent 是否参与流程——当前版本由 `registry.RegisterAgents` 固定注册全部 9 个 agent，未提供按需启停单个 agent 的配置开关。如需调整模型，改 aiclibridge 配置即可，zzauto 通过 `aicli_addr`/`aicli_key` 统一访问。
+aiclibridge 侧负责配置各 AI 后端（模型路由、API key、并发等）。zzauto 侧的「agents 启用」是指编排器注册的 9 个 agent 是否参与流程——当前版本由 `registry.RegisterAgents` 固定注册全部 9 个 agent，未提供按需启停单个 agent 的配置开关。
+
+### 每角色模型（v0.3.0）
+
+v0.3.0 起 zzauto 支持为 9 个 agent 各自配置模型，无需改 aiclibridge 配置：
+
+- `cfg.RoleModels`（`map[string]string`，key=stage 小写）持久化到 `zzauto.yaml` 的 `role_models` 段；env `ZZAUTO_ROLE_MODEL_<STAGE>` 覆盖（key 大写转小写）。
+- `RegisterAgents(orch, askFunc, roleModels)` 把各 stage 的模型注入到对应 agent；agent 调 AI 时用 `AskWithModel(ctx, roleModel, system, user)`，roleModel 为空串时 aiclibridge 用默认模型。
+- UI 在「Settings」页提供 9 行表单（`GET/PUT /api/settings/models`），PUT 时调 `cfg.Save("zzauto.yaml")` 落盘。
+
+详见 [settings.md](./settings.md) 与 [configuration.md](./configuration.md)。
+
+---
+
+## Stats 与 Runs 端点（v0.3.0）
+
+aiclibridge 在 v0.3.0 暴露 stats 与 runs 端点，供 zzauto 统计面板与任务面板使用：
+
+### Stats（统计面板数据源）
+
+| 端点 | 用途 | zzauto 客户端方法 | zzauto HTTP 代理路由 |
+| --- | --- | --- | --- |
+| `GET /v1/stats/usage` | 各模型 token 用量与 USD，含汇总 | `aicli.Usage(ctx)` | `GET /api/stats/usage` |
+| `GET /v1/stats/prices` | 各模型每 1M token 定价 | `aicli.Prices(ctx)` | （仅客户端，未代理） |
+| `GET /v1/stats/summary` | 总览（requests/tokens/usd/uptime） | `aicli.Summary(ctx)` | `GET /api/stats/summary` |
+| `GET /v1/stats/concurrency` | 并发（active/queued/max） | `aicli.Concurrency(ctx)` | `GET /api/stats/concurrency` |
+
+UI 统计面板每 30 秒自动刷新（可在 UI 关闭自动刷新），数据源为上述代理路由。详见 [stats.md](./stats.md)。
+
+### Runs（任务面板数据源）
+
+| 端点 | 用途 | zzauto 客户端方法 |
+| --- | --- | --- |
+| `POST /v1/runs` | 发起一次 run，SSE 流式返回事件 | `aicli.RunStream(ctx, model, system, user, onEvent)` |
+| `GET /v1/runs/{id}` | 拉取指定 run 的完整事件时间线 | `aicli.GetRun(ctx, runID)` |
+
+`RunEvent` 类型字段：`type`（thinking/text/tool_use/tool_result/result/error/system）、`content`、`tool_name`、`tool_input`、`run_id`、`error`。
+
+zzauto 的 `agents.RunWithTracking` 用 RunStream 调用 AI，把每个事件：
+
+1. 通过 bus 发布 `agent_run_event` 事件（含 run_id/event_type/content/tool_name/tool_input）；
+2. 累积到内存切片，结束后写到 `<projectDir>/runs/<agent>/<runID>.json`。
+
+UI 任务面板通过 `GET /api/projects/{id}/runs` 列出 run 摘要，`GET /api/projects/{id}/runs/{rid}` 读取完整事件时间线，按事件类型着色展示。详见 [task-panel.md](./task-panel.md)。
 
 ---
 
@@ -192,7 +245,10 @@ aiclibridge 侧负责配置各 AI 后端（模型路由、API key、并发等）
 
 | 文件 | 职责 |
 | --- | --- |
-| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Health/Chat/Messages/Ask） |
+| `internal/aicli/client.go` | aiclibridge HTTP 客户端（Health/Chat/Messages/Ask/AskWithModel/ChatWithModel/SetModel/Model） |
+| `internal/aicli/runs.go`（v0.3.0） | RunStream（SSE）+ GetRun |
+| `internal/aicli/stats.go`（v0.3.0） | Usage/Prices/Summary/Concurrency |
 | `cmd/zzauto/main.go` | serve 启动时的健康检查与提示 |
-| `internal/config/config.go` | `aicli_addr`/`aicli_key` 字段 |
-| `internal/agents/agent.go` | `AIClient` 接口定义 |
+| `internal/config/config.go` | `aicli_addr`/`aicli_key` 字段 + `RoleModels` |
+| `internal/agents/agent.go` | `AIClient` 接口定义 + `RunWithTracking` |
+| `internal/ui/handler.go` | `/api/stats/*` 代理 + `/api/projects/{id}/runs/*` |

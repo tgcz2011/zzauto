@@ -28,10 +28,12 @@ import (
 //
 // 模式判定：reports/generator.md 存在且 reports/evaluated/generator.md
 // 不存在 → 代码评估模式；否则 → 讨论模式。
-type Evaluator struct{}
+type Evaluator struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewEvaluator 构造一个 Evaluator 实例。
-func NewEvaluator() *Evaluator { return &Evaluator{} }
+// NewEvaluator 构造一个 Evaluator 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewEvaluator(model string) *Evaluator { return &Evaluator{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageEvaluator 对应。
 func (e *Evaluator) Name() string { return "evaluator" }
@@ -119,7 +121,7 @@ func (e *Evaluator) runDiscussion(ctx context.Context, ws *workspace.Workspace, 
 	combined := fmt.Sprintf("# spec.md（项目规格）\n%s\n\n# deal.md（完工协议）\n%s", specContent, dealContent)
 
 	// 调用 AI 批判性评估
-	resp, err := ai.Ask(ctx, discussEvalPrompt, combined)
+	resp, _, err := RunWithTracking(ctx, ws, bus, ai, e.Name(), e.model, discussEvalPrompt, combined)
 	if err != nil {
 		return e.failWith(bus, fmt.Errorf("调用 AI 评估 deal 失败: %w", err))
 	}
@@ -203,7 +205,7 @@ func (e *Evaluator) runCodeEvaluation(ctx context.Context, ws *workspace.Workspa
 	)
 
 	// 调用 AI 评估
-	resp, err := ai.Ask(ctx, codeEvalPrompt, combined)
+	resp, _, err := RunWithTracking(ctx, ws, bus, ai, e.Name(), e.model, codeEvalPrompt, combined)
 	if err != nil {
 		return e.failWith(bus, fmt.Errorf("调用 AI 评估代码失败: %w", err))
 	}

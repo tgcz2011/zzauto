@@ -25,11 +25,11 @@ go build ./...
 go build -o zzauto ./cmd/zzauto
 
 # 运行
-./zzauto version   # v0.1.0
+./zzauto version   # v0.3.0
 ./zzauto serve
 ```
 
-> GitHub Actions 在 release 时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖 `main.Version`，使二进制版本号对应 git tag。本地 `go build` 产物版本号为源码常量 `v0.1.0`。
+> GitHub Actions 在 release 时通过 `-ldflags "-X main.Version=${GITHUB_REF_NAME}"` 覆盖 `main.Version`，使二进制版本号对应 git tag。本地 `go build` 产物版本号为源码常量 `v0.3.0`。
 
 ---
 
@@ -67,21 +67,27 @@ zzauto/
   cmd/zzauto/            # CLI 主入口（main.go）
   internal/
     agents/              # 9 个 agent 实现 + 接口/schema/哨兵错误 + 各 *_test.go
-      agent.go           # Agent/AIClient/GittorClient 接口
+      agent.go           # Agent/AIClient/GittorClient 接口 + RunWithTracking（v0.3.0）
       schema.go          # 文档正文 schema 与常量
       errors.go          # ErrNoConsensus / ErrEvaluationFailed
       listener.go ... gittor_agent.go
     aicli/               # aiclibridge HTTP 客户端
-    config/              # 配置加载（zzauto.yaml + ZZAUTO_* env）
-    eventbus/            # 发布/订阅事件总线
+      client.go          # Chat/Ask/AskWithModel/ChatWithModel/SetModel/Model
+      bootstrap.go       # EnsureInstalled 自动安装
+      runs.go            # v0.3.0 RunStream（SSE）+ GetRun
+      stats.go           # v0.3.0 Usage/Prices/Summary/Concurrency
+    config/              # 配置加载（zzauto.yaml + ZZAUTO_* env）+ Save + RoleModels
+    eventbus/            # 发布/订阅事件总线（含 agent_run_event）
+    ghcli/               # v0.3.0 gh CLI 检测/安装提示/auth/Repos
     gittor/              # git CLI 隔离层
     installer/           # 自卸载与自升级
     orchestrator/        # 编排器与两个循环
-    registry/            # 组件装配（BuildOrchestrator / RegisterAgents）
-    ui/                  # HTTP API + SSE + 内嵌 Web UI
+    projects/            # v0.3.0 多项目 Registry + project.json 元数据
+    registry/            # 组件装配（BuildOrchestrator / RegisterAgents 接收 roleModels）
+    ui/                  # HTTP API + SSE + 内嵌 Web UI（4 页面 SPA）
       web/               # index.html / app.js / style.css
       embed.go           # embed 声明
-      handler.go
+      handler.go         # 含 projects/gh/settings/stats/runs 路由
     workspace/           # 工作区目录与文档协议（frontmatter 解析）
     e2e/                 # 端到端测试
   scripts/               # install.sh / install.ps1 一键安装脚本
@@ -92,6 +98,17 @@ zzauto/
   README.md / RELEASE.md / CONTRIBUTING.md / CHANGELOG.md
   go.mod / go.sum
 ```
+
+### v0.3.0 新增/变更的内部包
+
+- **`internal/projects`**：多项目注册表。`Registry` 持工作区根目录，提供 `List/Get/Create/Update/Delete/ProjectDir`。每项目对应 `<rootDir>/projects/<id>/project.json`，`ProjectMeta` 含 ID/Name/Repo/Branch/CreatedAt/UpdatedAt/Status/CurrentStage。`Create` 时建项目目录与 `agents/reports/runs/` 子目录、写空 `input.md`、写 `project.json`。详见 [multi-projects.md](./multi-projects.md)。
+- **`internal/ghcli`**：gh CLI 封装。`EnsureInstalled`（`exec.LookPath`）+ `InstallHint`（按 `runtime.GOOS` 返回 macOS/Linux/Windows 安装命令）+ `AuthStatus`（`gh auth status` 退出码）+ `LoginHint` + `Repos`（`gh repo list --json`，未登录返回 `ErrNotAuthenticated`）。详见 [gh-integration.md](./gh-integration.md)。
+- **`internal/aicli`**：v0.3.0 扩展 `ChatWithModel`/`AskWithModel`/`SetModel`/`Model`（每角色模型）、新增 `runs.go`（`RunStream` SSE + `GetRun`）与 `stats.go`（`Usage`/`Prices`/`Summary`/`Concurrency`）。
+- **`internal/agents`**：v0.3.0 `AIClient` 接口扩展为 `Ask`/`AskWithModel`/`RunStream`/`GetRun` 四方法；新增 `RunWithTracking` 辅助函数封装 RunStream + 事件持久化（`<projectDir>/runs/<agent>/<runID>.json`）+ `agent_run_event` 事件广播。
+- **`internal/config`**：v0.3.0 新增 `RoleModels map[string]string` 字段、`Save(path)` 方法、`ZZAUTO_ROLE_MODEL_<STAGE>` env 解析。
+- **`internal/eventbus`**：v0.3.0 新增 `EventAgentRunEvent` 事件类型。
+- **`internal/registry`**：v0.3.0 `RegisterAgents` 接收 `roleModels` 参数注入到各 agent；`BuildOrchestrator` 改为接收 `cfg/ws/bus/askFunc`，由调用方（UI handler）按项目装配。
+- **`internal/ui`**：v0.3.0 `Handler` 持 `projects.Registry` 而非单个 workspace；`currentWS()` 按当前选中项目动态构造；新增 17 路由覆盖 projects/gh/settings/stats/runs；前端 SPA 改造为 4 页面切换。
 
 ---
 

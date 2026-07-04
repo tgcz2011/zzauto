@@ -4,7 +4,7 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)
-![Release](https://img.shields.io/badge/release-v0.2.0-orange)
+![Release](https://img.shields.io/badge/release-v0.3.0-orange)
 
 ---
 
@@ -38,6 +38,12 @@
 - **aiclibridge 统一 AI 调用**：本地 HTTP 服务统一封装各 AI 后端；`serve` 时自动检测并安装，`upgrade` 时同步升级
 - **Gittor 隔离层**：通过注入的 `GittorClient` 调用 git CLI，conventional commits，不污染其他 agent
 - **Web UI**：embed 进单二进制，SSE 实时推送 agent 事件，Asker 交互问答通过浏览器完成
+- **多项目支持**：`internal/projects` Registry 管理多项目，UI 项目列表/新建/切换/删除，每个项目独立 workspace 与 `project.json` 元数据
+- **gh CLI 集成**：`serve` 启动时检测 gh CLI，未装则按平台打印安装命令并退出 1，未登录则提示 `gh auth login` 退出 1；新建项目弹窗从 `gh repo list` 拉取仓库下拉
+- **创建项目选 gh 仓库**：UI 新建项目弹窗从 `GET /api/gh/repos` 拉取仓库列表，选择 owner/repo 与分支即完成项目与远端仓库绑定
+- **每角色模型配置**：`config.RoleModels` + Settings 页，9 个 agent 各自配置模型，env `ZZAUTO_ROLE_MODEL_<STAGE>` 覆盖，持久化到 `zzauto.yaml`
+- **统计面板**：从 aiclibridge `/v1/stats/usage|summary|concurrency` 拉取 token/USD/并发数据，4 卡片 + 模型分布表 + 自动刷新
+- **任务面板**：每个 agent 的 run 详情（thinking/text/tool_use/tool_result/result/error 事件流），按项目+agent 查看，SSE 实时推送
 - **多平台安装**：macOS/Linux 一行 `curl | sh`，Windows 一行 `irm | iex`；`uninstall` / `upgrade` 走 GitHub releases 直链，不依赖 `gh` CLI
 
 ## 架构图
@@ -102,8 +108,28 @@ curl -fsSL https://github.com/tgcz2011/zzauto/raw/main/scripts/install.sh | sh -
 
 # 中国大陆加速
 GITHUB_MIRROR=https://ghproxy.com/ curl -fsSL https://github.com/tgcz2011/zzauto/raw/main/scripts/install.sh | sh
+```
 
-# 启动（首次会自动检测并安装 aiclibridge 本地 AI 网关）
+安装 gh CLI（v0.3.0 起 serve 启动前置依赖）：
+
+```sh
+# macOS
+brew install gh          # 或先 xcode-select --install
+# Debian/Ubuntu
+sudo apt install gh
+# Fedora/RHEL
+sudo dnf install gh
+# Arch
+sudo pacman -S github-cli
+
+# 登录 GitHub（按提示选 GitHub.com → HTTPS → 浏览器登录或粘贴 token）
+gh auth login
+```
+
+启动：
+
+```sh
+# 启动（首次会自动检测并安装 aiclibridge 本地 AI 网关，并校验 gh CLI 安装与登录状态）
 zzauto serve
 
 # 浏览器打开 http://127.0.0.1:8788，提交需求，等待 Asker 在页面问答
@@ -114,6 +140,13 @@ zzauto serve
 ```powershell
 # 一键安装（装到 %USERPROFILE%\bin\zzauto.exe）
 irm https://github.com/tgcz2011/zzauto/raw/main/scripts/install.ps1 | iex
+
+# 安装 gh CLI（v0.3.0 起 serve 启动前置依赖）
+winget install GitHub.cli
+# 或 choco install gh
+
+# 登录
+gh auth login
 
 # 启动
 zzauto serve
@@ -143,6 +176,18 @@ github:
   remote: git@github.com:tgcz2011/zzauto.git
   branch: main
   token: ""
+
+# 每角色模型配置（key=stage 小写，value=模型名；空字符串走默认模型）
+role_models:
+  listener: ""
+  asker: ""
+  planner: ""
+  designer: ""
+  evaluator: ""
+  manager: ""
+  executor: ""
+  generator: ""
+  gittor: ""
 ```
 
 ### 环境变量覆盖
@@ -156,6 +201,7 @@ github:
 | `ZZAUTO_GITHUB_REMOTE`      | `github.remote`      |
 | `ZZAUTO_GITHUB_BRANCH`      | `github.branch`      |
 | `ZZAUTO_GITHUB_TOKEN`       | `github.token`       |
+| `ZZAUTO_ROLE_MODEL_<STAGE>` | `role_models[stage]` |
 
 ## 命令参考
 
@@ -165,6 +211,8 @@ github:
 | `uninstall`  | 移除二进制与配置（保留项目数据）             | —                                                                    |
 | `upgrade`    | 从 GitHub releases 升级 zzauto 二进制         | —                                                                    |
 | `version`    | 打印版本号                                   | —                                                                    |
+
+> `serve` 启动顺序（v0.3.0）：加载配置 → aiclibridge 健康检查（不可达则自动安装或 `--no-auto-install` 退出 1）→ **gh CLI 检查（未装则按平台打印安装命令并退出 1，未登录则提示 `gh auth login` 退出 1）** → 启动 HTTP 服务。编排器不再启动时自动装配，改为 UI 在选中项目点「启动编排」时按需 `POST /api/projects/{id}/start`。
 
 示例：
 
@@ -185,6 +233,11 @@ zzauto version
 - [aiclibridge 网关](docs/aiclibridge.md)
 - [工作流程](docs/workflow.md)
 - [开发指南](docs/development.md)
+- [多项目管理](docs/multi-projects.md)
+- [gh CLI 集成](docs/gh-integration.md)
+- [Settings 设置](docs/settings.md)
+- [统计面板](docs/stats.md)
+- [任务面板](docs/task-panel.md)
 
 ## 开发
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
@@ -37,6 +38,31 @@ func (m *mockAskerAI) Ask(ctx context.Context, system, user string) (string, err
 	return "", fmt.Errorf("mockAskerAI: 无更多预设响应（第 %d 次调用）", idx+1)
 }
 
+// AskWithModel 与 Ask 行为一致，model 参数仅作签名兼容。
+func (m *mockAskerAI) AskWithModel(ctx context.Context, _, system, user string) (string, error) {
+	return m.Ask(ctx, system, user)
+}
+
+// RunStream 复用 Ask 的记录与响应逻辑，并通过 text 事件回传。
+// 因 agent 现走 RunWithTracking→RunStream，systems/users/calls 在此被填充。
+func (m *mockAskerAI) RunStream(ctx context.Context, _, system, user string, onEvent func(aicli.RunEvent) error) (string, error) {
+	resp, err := m.Ask(ctx, system, user)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil {
+		_ = onEvent(aicli.RunEvent{Type: "system", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "text", Content: resp, RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "result", RunID: "mock"})
+	}
+	return "mock", nil
+}
+
+// GetRun 返回空 RunDetail。
+func (m *mockAskerAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
+}
+
 // fakeAskerDesire 是测试用的 desire.md 正文。
 const fakeAskerDesire = "# 用户需求\n做一个待办事项应用，支持增删改查。\n\n# 改进点\n- 错误处理\n- 边界情况\n"
 
@@ -61,7 +87,7 @@ func newAskerTestWorkspace(t *testing.T, desire string) *workspace.Workspace {
 }
 
 func TestAsker_Name(t *testing.T) {
-	a := NewAsker(nil)
+	a := NewAsker(nil, "")
 	if got := a.Name(); got != "asker" {
 		t.Errorf("Name() = %q, want %q", got, "asker")
 	}
@@ -87,7 +113,7 @@ func TestAsker_Run_Success(t *testing.T) {
 		return "用户回答：" + q, nil
 	})
 
-	a := NewAsker(askFn)
+	a := NewAsker(askFn, "")
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -147,7 +173,8 @@ func TestAsker_Run_Success(t *testing.T) {
 	// 断言事件序列：agent_start → doc_update → agent_done
 	// 注：使用自定义 AskFunc 时不发布 ask_user 事件（该事件由默认 askViaBus 路径
 	// 发布，见 TestAsker_Run_AskViaBus）；提问循环正确性已通过上方 asked 断言覆盖。
-	events := drainEvents(ch)
+	// 注：agent_run_event 已被 filterLifecycleEvents 过滤。
+	events := filterLifecycleEvents(drainEvents(ch))
 	wantSeq := []string{
 		eventbus.EventAgentStart,
 		eventbus.EventDocUpdate,
@@ -185,7 +212,7 @@ func TestAsker_Run_DesireMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	a := NewAsker(nil)
+	a := NewAsker(nil, "")
 	err := a.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望缺失 desire.md 返回错误，got nil")
@@ -230,7 +257,7 @@ func TestAsker_Run_SatisfiedImmediate(t *testing.T) {
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		askCalled++
 		return "x", nil
-	}))
+	}), "")
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -265,7 +292,7 @@ func TestAsker_Run_JSONFallback(t *testing.T) {
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		asked = append(asked, q)
 		return "个人用户", nil
-	}))
+	}), "")
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -293,7 +320,7 @@ func TestAsker_Run_JSONWithExtraText(t *testing.T) {
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		asked = append(asked, q)
 		return "P99 < 200ms", nil
-	}))
+	}), "")
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -322,7 +349,7 @@ func TestAsker_Run_MaxRounds(t *testing.T) {
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		askCalled++
 		return "回答", nil
-	}))
+	}), "")
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
@@ -359,7 +386,7 @@ func TestAsker_Run_AskFuncError(t *testing.T) {
 	askErr := errors.New("用户取消")
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		return "", askErr
-	}))
+	}), "")
 	err := a.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望返回错误, got nil")
@@ -398,7 +425,7 @@ func TestAsker_Run_AIError(t *testing.T) {
 
 	a := NewAsker(AskFunc(func(ctx context.Context, q string) (string, error) {
 		return "回答", nil
-	}))
+	}), "")
 	err := a.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望返回错误, got nil")
@@ -458,7 +485,7 @@ func TestAsker_Run_AskViaBus(t *testing.T) {
 		}
 	}()
 
-	a := NewAsker(nil) // 使用默认 askViaBus
+	a := NewAsker(nil, "") // 使用默认 askViaBus
 	if err := a.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}

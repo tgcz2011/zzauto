@@ -99,12 +99,14 @@ type qaPair struct {
 // ask 持有向用户提问的回调，可为 nil：为 nil 时在 Run 中使用默认实现
 // askViaBus，通过事件总线与 ask_reply.md 文件完成无 UI 场景下的人工交互。
 type Asker struct {
-	ask AskFunc
+	ask   AskFunc
+	model string // 该角色配置的模型，空则用 aicli 默认
 }
 
 // NewAsker 创建一个 Asker 实例。ask 为 nil 时使用默认的 askViaBus 实现。
-func NewAsker(ask AskFunc) *Asker {
-	return &Asker{ask: ask}
+// model 为该角色配置的模型名，空串表示用默认。
+func NewAsker(ask AskFunc, model string) *Asker {
+	return &Asker{ask: ask, model: model}
 }
 
 // Name 返回 agent 标识 "asker"，与 workspace 阶段常量 StageAsker 对应。
@@ -155,7 +157,7 @@ func (a *Asker) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient, g
 	for round := 0; round < maxAskerRounds; round++ {
 		userCtx := buildAskerContext(desireContent, history)
 
-		resp, err := ai.Ask(ctx, askerSystemPrompt, userCtx)
+		resp, _, err := RunWithTracking(ctx, ws, bus, ai, a.Name(), a.model, askerSystemPrompt, userCtx)
 		if err != nil {
 			failErr := fmt.Errorf("调用 AI 生成问题失败: %w", err)
 			publishEvent(bus, eventbus.EventAgentFailed, a.Name(), map[string]any{
@@ -196,7 +198,7 @@ func (a *Asker) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient, g
 
 	// 4. 调用 AI 把问答历史整理成 need.md 正文
 	summaryCtx := buildAskerContext(desireContent, history)
-	needBody, err := ai.Ask(ctx, askerSummaryPrompt, summaryCtx)
+	needBody, _, err := RunWithTracking(ctx, ws, bus, ai, a.Name(), a.model, askerSummaryPrompt, summaryCtx)
 	if err != nil {
 		failErr := fmt.Errorf("调用 AI 生成 need.md 失败: %w", err)
 		publishEvent(bus, eventbus.EventAgentFailed, a.Name(), map[string]any{

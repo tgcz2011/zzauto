@@ -17,10 +17,12 @@ import (
 //
 // Manager 不与用户交互，仅做一次 AI 调用即可产出完整 task.md。
 // 产出的任务清单须覆盖 spec.md 中所有 ADDED Requirements，并具备清晰验收点。
-type Manager struct{}
+type Manager struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewManager 构造一个 Manager 实例。
-func NewManager() *Manager { return &Manager{} }
+// NewManager 构造一个 Manager 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewManager(model string) *Manager { return &Manager{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageManager 对应。
 func (m *Manager) Name() string { return "manager" }
@@ -94,7 +96,7 @@ func (m *Manager) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient,
 	)
 
 	// 4. 调用 AI 生成 task.md 正文
-	taskBody, err := ai.Ask(ctx, managerSystemPrompt, combined)
+	taskBody, _, err := RunWithTracking(ctx, ws, bus, ai, m.Name(), m.model, managerSystemPrompt, combined)
 	if err != nil {
 		failErr := fmt.Errorf("调用 AI 生成 task 失败: %w", err)
 		publishEvent(bus, eventbus.EventAgentFailed, m.Name(), map[string]any{

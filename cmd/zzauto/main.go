@@ -8,22 +8,19 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
-	"github.com/tgcz2011/zzauto/internal/agents"
 	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/config"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
+	"github.com/tgcz2011/zzauto/internal/ghcli"
 	"github.com/tgcz2011/zzauto/internal/installer"
-	"github.com/tgcz2011/zzauto/internal/registry"
+	"github.com/tgcz2011/zzauto/internal/projects"
 	"github.com/tgcz2011/zzauto/internal/ui"
-	"github.com/tgcz2011/zzauto/internal/workspace"
 )
 
 // Version zzauto 版本号。
-const Version = "v0.2.0"
+const Version = "v0.3.0"
 
 func main() {
 	log.SetFlags(0)
@@ -110,11 +107,8 @@ func runServe(args []string) {
 	// 创建事件总线
 	bus := eventbus.New()
 
-	// 创建工作区并确保目录就绪
-	ws := workspace.NewProject(cfg.WorkspaceDir)
-	if err := ws.EnsureDirs(); err != nil {
-		log.Fatalf("创建工作区目录失败: %v", err)
-	}
+	// 创建项目注册表（多项目管理）
+	reg := projects.New(cfg.WorkspaceDir)
 
 	// 检查 aiclibridge 可达性，不可达时按需自动安装
 	aiClient := aicli.New(cfg.AicliAddr, cfg.AicliKey)
@@ -143,17 +137,26 @@ func runServe(args []string) {
 		healthCancel()
 	}
 
-	// 创建 UI handler，适配 AskUser 为 agents.AskFunc 签名
-	handler := ui.New(bus, ws, cfg)
-	askFunc := agents.AskFunc(func(ctx context.Context, question string) (string, error) {
-		return handler.AskUser(question)
-	})
-
-	// 装配编排器
-	orch, err := registry.BuildOrchestrator(cfg, ws, bus, askFunc)
-	if err != nil {
-		log.Fatalf("装配编排器失败: %v", err)
+	// gh CLI 检查：未安装则打印平台安装提示并退出
+	if err := ghcli.EnsureInstalled(); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
 	}
+	// gh auth 检查：未登录则打印登录提示并退出
+	ghCheckCtx, ghCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	loggedIn, err := ghcli.AuthStatus(ghCheckCtx)
+	ghCancel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "检查 gh 登录状态失败: %v\n", err)
+		os.Exit(1)
+	}
+	if !loggedIn {
+		fmt.Fprintln(os.Stderr, ghcli.LoginHint())
+		os.Exit(1)
+	}
+
+	// 创建 UI handler（orchestrator 按需在 handleStartProject 中装配）
+	handler := ui.New(bus, reg, cfg)
 
 	// 注册 HTTP 路由
 	mux := http.NewServeMux()
@@ -161,15 +164,6 @@ func runServe(args []string) {
 		fmt.Fprintln(w, "zzauto running")
 	})
 	handler.Register(mux)
-
-	// 启动编排器（后台 goroutine，监听 SIGINT/SIGTERM 取消 context）
-	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		if err := orch.Run(runCtx); err != nil {
-			log.Printf("编排器退出: %v", err)
-		}
-	}()
 
 	// 启动 HTTP 服务
 	log.Printf("zzauto %s 监听 %s", Version, cfg.Listen)

@@ -8,145 +8,474 @@
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg-gray-50 text-gray-800 min-h-screen" x-data="appData()">
+<body class="bg-gray-50 text-gray-800 min-h-screen" x-data="appData()" x-cloak>
   <!-- 顶部 -->
-  <header class="bg-white border-b shadow-sm sticky top-0 z-10">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <h1 class="text-xl font-bold text-gray-900">zzauto</h1>
-        <span class="text-xs text-gray-500 hidden sm:inline">多层 agent 协作的 AI 自主编程平台</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-sm text-gray-500">当前阶段</span>
-        <span class="px-3 py-1 rounded-full text-sm font-medium"
-              :class="stageBadgeClass(state.stage)"
-              x-text="state.stage || '待启动'"></span>
+  <header class="bg-white border-b shadow-sm sticky top-0 z-20">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
+      <h1 class="text-xl font-bold text-gray-900">zzauto</h1>
+      <nav class="flex items-center gap-1">
+        <template x-for="p in [['projects','项目'],['settings','设置'],['stats','统计'],['tasks','任务面板']]" :key="p[0]">
+          <button @click="switchPage(p[0])"
+                  class="px-3 py-1.5 text-sm rounded transition"
+                  :class="page===p[0] ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'"
+                  x-text="p[1]"></button>
+        </template>
+      </nav>
+      <div class="ml-auto flex items-center gap-3">
+        <span class="text-sm text-gray-500 hidden sm:inline">当前项目</span>
+        <span class="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-700"
+              x-text="currentProject?.name || '未选择'"></span>
+        <span class="text-xs text-gray-400 hidden md:inline"
+              x-show="state.stage"
+              x-text="'阶段 ' + state.stage"></span>
       </div>
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-4 py-4 grid grid-cols-12 gap-4">
-    <!-- 左侧：流程步骤 -->
-    <section class="col-span-12 lg:col-span-3">
-      <div class="bg-white rounded-lg shadow p-4">
-        <h2 class="font-semibold mb-3 text-gray-900">流程步骤</h2>
-        <ol class="space-y-2">
-          <template x-for="(a, i) in state.agents" :key="a.stage">
-            <li class="flex items-center gap-2 px-2 py-2 rounded" :class="agentRowClass(a)">
-              <span class="w-5 h-5 flex items-center justify-center rounded-full text-xs font-semibold"
-                    :class="agentDotClass(a)" x-text="i+1"></span>
-              <span class="text-sm text-gray-700" x-text="a.name"></span>
-              <span class="ml-auto text-xs text-gray-500" x-text="statusLabel(a.status)"></span>
-            </li>
-          </template>
-        </ol>
-      </div>
-    </section>
+  <main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
 
-    <!-- 中间：文档查看器 -->
-    <section class="col-span-12 lg:col-span-6">
-      <div class="bg-white rounded-lg shadow p-4 flex flex-col" style="min-height: 24rem;">
-        <div class="flex items-center gap-2 mb-3 flex-wrap">
-          <h2 class="font-semibold text-gray-900">文档查看器</h2>
-          <div class="ml-auto flex gap-1">
-            <template x-for="d in ['desire','need','spec','deal','task']" :key="d">
-              <button class="px-2 py-1 text-xs rounded transition"
-                      :class="selectedDoc===d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-                      x-text="d" @click="selectDoc(d)"></button>
-            </template>
+    <!-- ========== 项目页 ========== -->
+    <div x-show="page==='projects'" class="grid grid-cols-12 gap-4">
+      <!-- 左侧：项目列表 -->
+      <section class="col-span-12 lg:col-span-4">
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="flex items-center mb-3">
+            <h2 class="font-semibold text-gray-900">项目列表</h2>
+            <span class="ml-2 text-xs text-gray-400" x-text="'('+projects.length+')'"></span>
+            <button @click="openNewProject()"
+                    class="ml-auto bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition">+ 新建项目</button>
+          </div>
+          <div class="overflow-auto" style="max-height: 32rem;">
+            <table class="w-full text-sm" x-show="projects.length>0">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 border-b">
+                  <th class="py-2 pr-2 font-medium">名称</th>
+                  <th class="py-2 pr-2 font-medium">仓库</th>
+                  <th class="py-2 pr-2 font-medium">状态</th>
+                  <th class="py-2 pr-2 font-medium">创建</th>
+                  <th class="py-2 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="p in projects" :key="p.id">
+                  <tr class="border-b hover:bg-gray-50 cursor-pointer"
+                      :class="currentID===p.id ? 'bg-blue-50' : ''"
+                      @click="selectProject(p.id)">
+                    <td class="py-2 pr-2 font-medium text-gray-800" x-text="p.name"></td>
+                    <td class="py-2 pr-2 text-gray-600 text-xs" x-text="p.repo || '-'"></td>
+                    <td class="py-2 pr-2">
+                      <span class="px-2 py-0.5 rounded text-xs"
+                            :class="projectStatusClass(p.status)"
+                            x-text="p.status || 'pending'"></span>
+                    </td>
+                    <td class="py-2 pr-2 text-xs text-gray-500" x-text="formatTime(p.created_at)"></td>
+                    <td class="py-2" @click.stop>
+                      <button @click="deleteProject(p.id)"
+                              class="text-xs text-red-500 hover:text-red-700">删除</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div x-show="projects.length===0" class="text-center py-8 text-gray-400 text-sm">
+              <p>暂无项目</p>
+              <button @click="openNewProject()"
+                      class="mt-3 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded transition">新建第一个项目</button>
+            </div>
           </div>
         </div>
-        <div class="flex-1 overflow-auto bg-gray-50 rounded p-3 text-sm">
-          <template x-if="docs[selectedDoc]">
-            <div>
-              <div class="mb-2 text-xs text-gray-500"
-                   x-show="docs[selectedDoc] && docs[selectedDoc].meta && docs[selectedDoc].meta.stage">
-                阶段：<span class="font-medium" x-text="docs[selectedDoc].meta?.stage"></span>
-                · 状态：<span class="font-medium" x-text="docs[selectedDoc].meta?.status"></span>
-                · 更新：<span x-text="formatTime(docs[selectedDoc].meta?.updated_at)"></span>
-              </div>
-              <pre class="whitespace-pre-wrap break-words font-mono text-xs text-gray-800"
-                   x-text="docs[selectedDoc].body || docs[selectedDoc].raw || '（空）'"></pre>
-            </div>
-          </template>
-          <template x-if="!docs[selectedDoc]">
-            <div class="text-gray-400 text-sm">暂无内容</div>
-          </template>
+      </section>
+
+      <!-- 右侧：当前项目详情 -->
+      <section class="col-span-12 lg:col-span-8 grid grid-cols-12 gap-4">
+        <!-- 流程步骤 -->
+        <div class="col-span-12 md:col-span-4">
+          <div class="bg-white rounded-lg shadow p-4 h-full">
+            <h2 class="font-semibold mb-3 text-gray-900">流程步骤</h2>
+            <ol class="space-y-2" x-show="currentID">
+              <template x-for="(a, i) in state.agents" :key="a.stage">
+                <li class="flex items-center gap-2 px-2 py-2 rounded" :class="agentRowClass(a)">
+                  <span class="w-5 h-5 flex items-center justify-center rounded-full text-xs font-semibold"
+                        :class="agentDotClass(a)" x-text="i+1"></span>
+                  <span class="text-sm text-gray-700" x-text="a.name"></span>
+                  <span class="ml-auto text-xs text-gray-500" x-text="statusLabel(a.status)"></span>
+                </li>
+              </template>
+            </ol>
+            <div x-show="!currentID" class="text-xs text-gray-400">请先选择或创建项目</div>
+            <button x-show="currentID" @click="startOrchestrator()"
+                    class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white text-sm py-2 rounded transition">启动编排</button>
+          </div>
         </div>
-      </div>
-    </section>
 
-    <!-- 右侧：需求 / 问答 / GitHub -->
-    <section class="col-span-12 lg:col-span-3 space-y-4">
-      <!-- 用户需求 -->
-      <div class="bg-white rounded-lg shadow p-4">
-        <h2 class="font-semibold mb-2 text-gray-900">提交需求</h2>
-        <textarea x-model="inputRequest" rows="4" placeholder="描述你想要构建的应用..."
-                  class="w-full text-sm border border-gray-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-        <button @click="submitInput()"
-                class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 rounded transition">提交</button>
-      </div>
-
-      <!-- Asker 问答 -->
-      <div class="bg-white rounded-lg shadow p-4">
-        <h2 class="font-semibold mb-2 text-gray-900">
-          待回答问题 <span class="text-xs text-gray-400" x-text="'('+asks.length+')'"></span>
-        </h2>
-        <div class="space-y-3">
-          <template x-for="ask in asks" :key="ask.id">
-            <div class="border border-gray-200 rounded p-2 bg-yellow-50">
-              <div class="text-sm text-gray-700" x-text="ask.question"></div>
-              <div class="flex gap-2 mt-2">
-                <input type="text" x-model="answerInputs[ask.id]" placeholder="输入回答..."
-                       class="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500">
-                <button @click="submitAnswer(ask.id)"
-                        class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded transition">回答</button>
+        <!-- 文档查看器 -->
+        <div class="col-span-12 md:col-span-8">
+          <div class="bg-white rounded-lg shadow p-4 flex flex-col" style="min-height: 24rem;">
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+              <h2 class="font-semibold text-gray-900">文档查看器</h2>
+              <div class="ml-auto flex gap-1">
+                <template x-for="d in ['desire','need','spec','deal','task']" :key="d">
+                  <button class="px-2 py-1 text-xs rounded transition"
+                          :class="selectedDoc===d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                          x-text="d" @click="selectDoc(d)"></button>
+                </template>
               </div>
             </div>
-          </template>
-          <div x-show="asks.length===0" class="text-xs text-gray-400">暂无待答问题</div>
+            <div class="flex-1 overflow-auto bg-gray-50 rounded p-3 text-sm">
+              <template x-if="docs[selectedDoc]">
+                <div>
+                  <div class="mb-2 text-xs text-gray-500"
+                       x-show="docs[selectedDoc] && docs[selectedDoc].meta && docs[selectedDoc].meta.stage">
+                    阶段：<span class="font-medium" x-text="docs[selectedDoc].meta?.stage"></span>
+                    · 状态：<span class="font-medium" x-text="docs[selectedDoc].meta?.status"></span>
+                    · 更新：<span x-text="formatTime(docs[selectedDoc].meta?.updated_at)"></span>
+                  </div>
+                  <pre class="whitespace-pre-wrap break-words font-mono text-xs text-gray-800"
+                       x-text="docs[selectedDoc].body || docs[selectedDoc].raw || '（空）'"></pre>
+                </div>
+              </template>
+              <template x-if="!docs[selectedDoc]">
+                <div class="text-gray-400 text-sm" x-text="currentID ? '暂无内容' : '请先选择项目'"></div>
+              </template>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <!-- GitHub 配置 -->
-      <div class="bg-white rounded-lg shadow p-4">
-        <h2 class="font-semibold mb-2 text-gray-900">GitHub 配置</h2>
-        <label class="block text-xs text-gray-500 mt-1">Remote</label>
-        <input type="text" x-model="githubForm.remote" placeholder="https://github.com/..."
-               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
-        <label class="block text-xs text-gray-500 mt-1">Branch</label>
-        <input type="text" x-model="githubForm.branch" placeholder="main"
-               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
-        <label class="block text-xs text-gray-500 mt-1">Token</label>
-        <input type="password" x-model="githubForm.token" placeholder="ghp_..."
-               class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
-        <button @click="submitGithub()"
-                class="mt-2 w-full bg-gray-800 hover:bg-black text-white text-sm py-2 rounded transition">保存</button>
-      </div>
-    </section>
-
-    <!-- 底部：实时日志 -->
-    <section class="col-span-12">
-      <div class="bg-gray-900 rounded-lg shadow p-4">
-        <div class="flex items-center mb-2">
-          <h2 class="font-semibold text-gray-100">实时日志</h2>
-          <span class="ml-2 text-xs text-gray-500" x-text="logs.length + ' 条'"></span>
-          <button @click="logs=[]" class="ml-auto text-xs text-gray-400 hover:text-white">清空</button>
+        <!-- 提交需求 + Asker + GitHub override -->
+        <div class="col-span-12 grid grid-cols-12 gap-4">
+          <div class="col-span-12 md:col-span-6">
+            <div class="bg-white rounded-lg shadow p-4">
+              <h2 class="font-semibold mb-2 text-gray-900">提交需求</h2>
+              <textarea x-model="inputRequest" rows="4" placeholder="描述你想要构建的应用..."
+                        class="w-full text-sm border border-gray-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+              <button @click="submitInput()"
+                      class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 rounded transition">提交</button>
+            </div>
+          </div>
+          <div class="col-span-12 md:col-span-6">
+            <div class="bg-white rounded-lg shadow p-4">
+              <h2 class="font-semibold mb-2 text-gray-900">
+                待回答问题 <span class="text-xs text-gray-400" x-text="'('+asks.length+')'"></span>
+              </h2>
+              <div class="space-y-3">
+                <template x-for="ask in asks" :key="ask.id">
+                  <div class="border border-gray-200 rounded p-2 bg-yellow-50">
+                    <div class="text-sm text-gray-700" x-text="ask.question"></div>
+                    <div class="flex gap-2 mt-2">
+                      <input type="text" x-model="answerInputs[ask.id]" placeholder="输入回答..."
+                             class="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500">
+                      <button @click="submitAnswer(ask.id)"
+                              class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded transition">回答</button>
+                    </div>
+                  </div>
+                </template>
+                <div x-show="asks.length===0" class="text-xs text-gray-400">暂无待答问题</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-span-12">
+            <div class="bg-white rounded-lg shadow p-4">
+              <details>
+                <summary class="font-semibold text-gray-900 cursor-pointer">GitHub 配置覆盖（可选）</summary>
+                <p class="text-xs text-gray-500 mt-1">默认由 gh CLI 管理 GitHub 鉴权；以下字段仅在需要覆盖远端或分支时填写。</p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                  <div>
+                    <label class="block text-xs text-gray-500">Remote</label>
+                    <input type="text" x-model="githubForm.remote" placeholder="https://github.com/..."
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-500">Branch</label>
+                    <input type="text" x-model="githubForm.branch" placeholder="main"
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-500">Token（可选 override）</label>
+                    <input type="password" x-model="githubForm.token" placeholder="ghp_..."
+                           class="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                  </div>
+                </div>
+                <button @click="submitGithub()"
+                        class="mt-3 bg-gray-800 hover:bg-black text-white text-sm py-2 px-4 rounded transition">保存</button>
+              </details>
+            </div>
+          </div>
         </div>
-        <div class="overflow-auto max-h-72 font-mono text-xs space-y-1">
-          <template x-for="(l, i) in logs" :key="i">
-            <div class="text-green-300">
-              <span class="text-gray-500" x-text="formatTime(l.time)"></span>
-              <span class="text-yellow-300 ml-2" x-text="l.type"></span>
-              <span class="text-blue-300 ml-2" x-show="l.agent" x-text="'['+l.agent+']'"></span>
-              <span class="ml-2" x-text="formatData(l.data)"></span>
+      </section>
+    </div>
+
+    <!-- ========== 设置页 ========== -->
+    <div x-show="page==='settings'">
+      <div class="bg-white rounded-lg shadow p-6 max-w-3xl mx-auto">
+        <div class="flex items-center mb-4">
+          <h2 class="font-semibold text-gray-900 text-lg">角色模型设置</h2>
+          <button @click="loadModels()"
+                  class="ml-auto text-xs text-gray-500 hover:text-gray-700">重新加载</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">
+          为每个 agent 角色配置独立模型（覆盖默认模型）。留空则使用 aiclibridge 默认模型
+          <code class="bg-gray-100 px-1 rounded" x-text="defaultModel || 'claude/anthropic/claude-sonnet-4.5'"></code>。
+        </p>
+        <div class="space-y-2">
+          <template x-for="a in agents" :key="a.stage">
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <label class="col-span-4 md:col-span-3 text-sm text-gray-700 font-medium" x-text="a.stage"></label>
+              <input type="text" x-model="roleModels[a.stage]"
+                     :placeholder="defaultModel || 'claude/anthropic/claude-sonnet-4.5'"
+                     class="col-span-8 md:col-span-9 text-sm border border-gray-300 rounded px-2 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
           </template>
-          <div x-show="logs.length===0" class="text-gray-500">等待事件...</div>
+        </div>
+        <div class="flex items-center mt-5">
+          <span class="text-xs text-gray-400" x-show="settingsSaved" x-text="'已保存 ✓'"></span>
+          <button @click="saveModels()"
+                  class="ml-auto bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 px-5 rounded transition">保存</button>
         </div>
       </div>
-    </section>
+    </div>
+
+    <!-- ========== 统计页 ========== -->
+    <div x-show="page==='stats'">
+      <div class="space-y-4">
+        <div class="flex items-center">
+          <h2 class="font-semibold text-gray-900 text-lg">统计面板</h2>
+          <button @click="loadStats()"
+                  class="ml-auto bg-white border border-gray-300 hover:bg-gray-50 text-sm px-3 py-1.5 rounded transition">刷新</button>
+          <label class="ml-3 text-xs text-gray-500 flex items-center gap-1">
+            <input type="checkbox" x-model="autoRefreshStats" @change="toggleAutoRefreshStats()"> 自动刷新（10s）
+          </label>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="text-xs text-gray-500">总请求数</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1" x-text="stats.summary?.total_requests ?? '-'"></div>
+          </div>
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="text-xs text-gray-500">总 Token</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1" x-text="stats.summary?.total_tokens ?? '-'"></div>
+          </div>
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="text-xs text-gray-500">总 USD</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1" x-text="formatUSD(stats.summary?.total_usd)"></div>
+          </div>
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="text-xs text-gray-500">并发</div>
+            <div class="text-2xl font-bold text-gray-900 mt-1">
+              <span x-text="stats.concurrency?.active ?? '-'"></span>
+              <span class="text-sm text-gray-400">/</span>
+              <span x-text="stats.concurrency?.queued ?? '-'"></span>
+              <span class="text-sm text-gray-400">/</span>
+              <span x-text="stats.concurrency?.max ?? '-'"></span>
+            </div>
+            <div class="text-xs text-gray-400 mt-1">active / queued / max</div>
+          </div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4">
+          <div class="flex items-center mb-3">
+            <h3 class="font-semibold text-gray-900">模型分布</h3>
+            <span class="ml-2 text-xs text-gray-400" x-text="'('+(stats.usage?.models?.length||0)+' 个模型)'"></span>
+          </div>
+          <div class="overflow-auto">
+            <table class="w-full text-sm" x-show="stats.usage?.models?.length>0">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 border-b">
+                  <th class="py-2 pr-2 font-medium">模型</th>
+                  <th class="py-2 pr-2 font-medium text-right">prompt_tokens</th>
+                  <th class="py-2 pr-2 font-medium text-right">completion_tokens</th>
+                  <th class="py-2 pr-2 font-medium text-right">total_tokens</th>
+                  <th class="py-2 pr-2 font-medium text-right">requests</th>
+                  <th class="py-2 font-medium text-right">USD</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in (stats.usage?.models || [])" :key="m.model">
+                  <tr class="border-b">
+                    <td class="py-2 pr-2 font-mono text-xs" x-text="m.model"></td>
+                    <td class="py-2 pr-2 text-right" x-text="m.prompt_tokens"></td>
+                    <td class="py-2 pr-2 text-right" x-text="m.completion_tokens"></td>
+                    <td class="py-2 pr-2 text-right" x-text="m.total_tokens"></td>
+                    <td class="py-2 pr-2 text-right" x-text="m.requests"></td>
+                    <td class="py-2 text-right" x-text="formatUSD(m.usd)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div x-show="!stats.usage?.models?.length" class="text-center py-6 text-gray-400 text-sm">暂无数据</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 任务面板页 ========== -->
+    <div x-show="page==='tasks'" class="space-y-4">
+      <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center gap-3 flex-wrap">
+          <h2 class="font-semibold text-gray-900 text-lg">任务面板</h2>
+          <select @change="selectProject($event.target.value); loadRuns()"
+                  class="text-sm border border-gray-300 rounded px-2 py-1">
+            <template x-for="p in projects" :key="p.id">
+              <option :value="p.id" :selected="p.id===currentID" x-text="p.name"></option>
+            </template>
+          </select>
+          <span class="text-xs text-gray-400" x-show="!currentID">请先选择项目</span>
+        </div>
+        <div class="flex gap-1 mt-3 flex-wrap">
+          <template x-for="a in agents" :key="a.stage">
+            <button @click="selectTaskAgent(a.stage)"
+                    class="px-3 py-1.5 text-xs rounded transition"
+                    :class="taskAgent===a.stage ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                    x-text="a.stage"></button>
+          </template>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-4">
+        <!-- runs 列表 -->
+        <div class="col-span-12 md:col-span-5">
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex items-center mb-3">
+              <h3 class="font-semibold text-gray-900">Runs <span class="text-xs text-gray-400" x-text="'('+taskRuns.length+')'"></span></h3>
+              <button @click="loadRuns()"
+                      class="ml-auto text-xs text-gray-500 hover:text-gray-700">刷新</button>
+            </div>
+            <div class="space-y-2 overflow-auto" style="max-height: 28rem;">
+              <template x-for="r in taskRuns" :key="r.id">
+                <div class="border rounded p-2 cursor-pointer transition"
+                     :class="selectedRunID===r.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'"
+                     @click="loadRunDetail(r.id)">
+                  <div class="flex items-center">
+                    <span class="font-mono text-xs text-gray-700" x-text="shortID(r.id)"></span>
+                    <span class="ml-auto text-xs text-gray-400" x-text="formatTime(r.created_at)"></span>
+                  </div>
+                  <div class="text-xs text-gray-500 mt-1" x-text="r.agent"></div>
+                </div>
+              </template>
+              <div x-show="taskRuns.length===0" class="text-center py-6 text-gray-400 text-sm">暂无 run</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 事件时间线 -->
+        <div class="col-span-12 md:col-span-7">
+          <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex items-center mb-3">
+              <h3 class="font-semibold text-gray-900">事件时间线</h3>
+              <span class="ml-2 text-xs text-gray-400" x-show="selectedRunID" x-text="selectedRunID"></span>
+            </div>
+            <div class="space-y-2 overflow-auto" style="max-height: 36rem;">
+              <template x-for="(ev, i) in runEvents()" :key="i">
+                <div class="rounded p-2 text-sm"
+                     :class="eventClass(ev)">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-semibold uppercase" x-text="ev.event_type || ev.type"></span>
+                    <span class="ml-auto text-xs text-gray-400" x-show="ev.tool_name" x-text="ev.tool_name"></span>
+                    <button x-show="(ev.event_type||ev.type)==='thinking'" @click="toggleEvent(i)"
+                            class="text-xs text-gray-500 hover:text-gray-700">
+                      <span x-text="openedEvents[i] ? '收起' : '展开'"></span>
+                    </button>
+                  </div>
+                  <template x-if="(ev.event_type||ev.type)==='thinking'">
+                    <pre class="font-mono text-xs text-purple-800 whitespace-pre-wrap break-words overflow-hidden"
+                         :class="openedEvents[i] ? '' : 'max-h-6'"
+                         x-text="ev.content"></pre>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='text'">
+                    <div class="text-gray-800 whitespace-pre-wrap break-words" x-text="ev.content"></div>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='tool_use'">
+                    <div>
+                      <div class="text-xs text-blue-700 font-mono mb-1" x-text="ev.tool_name"></div>
+                      <pre class="font-mono text-xs text-blue-900 bg-blue-50 p-2 rounded whitespace-pre-wrap break-words"
+                           x-text="ev.tool_input"></pre>
+                    </div>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='tool_result'">
+                    <pre class="font-mono text-xs text-green-900 bg-green-50 p-2 rounded whitespace-pre-wrap break-words"
+                         x-text="ev.content"></pre>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='result'">
+                    <div class="font-bold text-gray-900 whitespace-pre-wrap break-words" x-text="ev.content"></div>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='error'">
+                    <div class="text-red-700 font-mono text-xs" x-text="ev.error || ev.content"></div>
+                  </template>
+                  <template x-if="(ev.event_type||ev.type)==='system'">
+                    <div class="text-xs text-gray-500" x-text="ev.content"></div>
+                  </template>
+                </div>
+              </template>
+              <div x-show="!taskRunDetail && !selectedRunID" class="text-center py-6 text-gray-400 text-sm">选择左侧 run 查看事件</div>
+              <div x-show="selectedRunID && runEvents().length===0" class="text-center py-6 text-gray-400 text-sm">暂无事件</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 实时日志（全局） -->
+    <div class="bg-gray-900 rounded-lg shadow p-4">
+      <div class="flex items-center mb-2">
+        <h2 class="font-semibold text-gray-100">实时日志</h2>
+        <span class="ml-2 text-xs text-gray-500" x-text="logs.length + ' 条'"></span>
+        <button @click="logs=[]" class="ml-auto text-xs text-gray-400 hover:text-white">清空</button>
+      </div>
+      <div class="overflow-auto max-h-72 font-mono text-xs space-y-1">
+        <template x-for="(l, i) in logs" :key="i">
+          <div class="text-green-300">
+            <span class="text-gray-500" x-text="formatTime(l.time)"></span>
+            <span class="text-yellow-300 ml-2" x-text="l.type"></span>
+            <span class="text-blue-300 ml-2" x-show="l.agent" x-text="'['+l.agent+']'"></span>
+            <span class="ml-2" x-text="formatData(l.data)"></span>
+          </div>
+        </template>
+        <div x-show="logs.length===0" class="text-gray-500">等待事件...</div>
+      </div>
+    </div>
   </main>
+
+  <!-- 新建项目弹窗 -->
+  <div x-show="showNewProject" x-cloak
+       class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-30 p-4"
+       @click.self="closeNewProject()">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+      <div class="flex items-center mb-4">
+        <h3 class="font-semibold text-gray-900 text-lg">新建项目</h3>
+        <button @click="closeNewProject()" class="ml-auto text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">名称 *</label>
+          <input type="text" x-model="newProject.name" placeholder="项目名称"
+                 class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">仓库</label>
+          <select x-model="newProject.repo"
+                  class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">（手动输入或选择）</option>
+            <template x-for="r in ghRepos" :key="r.nameWithOwner">
+              <option :value="r.nameWithOwner" x-text="r.nameWithOwner + (r.isPrivate ? ' (private)' : '')"></option>
+            </template>
+          </select>
+          <input type="text" x-model="newProject.repo" placeholder="owner/name"
+                 class="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">分支</label>
+          <input type="text" x-model="newProject.branch" placeholder="main"
+                 class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div x-show="ghReposError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 whitespace-pre-wrap"
+             x-text="ghReposError"></div>
+      </div>
+      <div class="flex items-center gap-2 mt-5">
+        <button @click="closeNewProject()"
+                class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm py-2 rounded transition">取消</button>
+        <button @click="createProject()"
+                class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 rounded transition">创建</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
@@ -30,6 +31,32 @@ func (m *mockAI) Ask(ctx context.Context, system, user string) (string, error) {
 		return "", m.err
 	}
 	return m.resp, nil
+}
+
+// AskWithModel 与 Ask 行为一致，model 参数仅作签名兼容。
+func (m *mockAI) AskWithModel(ctx context.Context, _, system, user string) (string, error) {
+	return m.Ask(ctx, system, user)
+}
+
+// RunStream 模拟 SSE 流：记录调用参数后通过 text 事件返回预设响应。
+// 行为与 Ask 等价，便于 RunWithTracking 走流式路径时复用同一断言。
+func (m *mockAI) RunStream(ctx context.Context, _, system, user string, onEvent func(aicli.RunEvent) error) (string, error) {
+	// 复用 Ask 的记录与错误处理逻辑
+	resp, err := m.Ask(ctx, system, user)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil {
+		_ = onEvent(aicli.RunEvent{Type: "system", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "text", Content: resp, RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "result", RunID: "mock"})
+	}
+	return "mock", nil
+}
+
+// GetRun 返回空 RunDetail，本组测试不依赖该方法。
+func (m *mockAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
 }
 
 // mockGittor 实现 GittorClient，记录调用、不执行真实 git 操作。
@@ -107,8 +134,23 @@ func drainEvents(ch <-chan eventbus.Event) []eventbus.Event {
 	}
 }
 
+// filterLifecycleEvents 过滤掉 agent_run_event，仅保留 agent 生命周期事件
+// （agent_start / doc_update / agent_done / agent_failed）。
+// 各 agent 改造为 RunWithTracking 后会发布 agent_run_event 事件，
+// 但多数测试只断言生命周期事件序列，故在此统一过滤。
+func filterLifecycleEvents(events []eventbus.Event) []eventbus.Event {
+	out := make([]eventbus.Event, 0, len(events))
+	for _, e := range events {
+		if e.Type == eventbus.EventAgentRunEvent {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func TestPlanner_Name(t *testing.T) {
-	p := NewPlanner()
+	p := NewPlanner("")
 	if got := p.Name(); got != "planner" {
 		t.Errorf("Name() = %q, want %q", got, "planner")
 	}
@@ -123,12 +165,12 @@ func TestPlanner_Run_Success(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	p := NewPlanner()
+	p := NewPlanner("")
 	if err := p.Run(context.Background(), w, ai, git, bus); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
 	}
 
-	events := drainEvents(ch)
+	events := filterLifecycleEvents(drainEvents(ch))
 
 	// 断言 AI 被调用，且参数正确
 	if !ai.called {
@@ -175,6 +217,7 @@ func TestPlanner_Run_Success(t *testing.T) {
 	}
 
 	// 断言事件序列：agent_start -> doc_update -> agent_done
+	// 注：agent_run_event 已被 filterLifecycleEvents 过滤（见上）。
 	wantSeq := []string{
 		eventbus.EventAgentStart,
 		eventbus.EventDocUpdate,
@@ -211,7 +254,7 @@ func TestPlanner_Run_NeedMissing(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	p := NewPlanner()
+	p := NewPlanner("")
 	err := p.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望返回错误，got nil")
@@ -254,7 +297,7 @@ func TestPlanner_Run_AIError(t *testing.T) {
 	defer bus.Close()
 	ch := bus.Subscribe()
 
-	p := NewPlanner()
+	p := NewPlanner("")
 	err := p.Run(context.Background(), w, ai, git, bus)
 	if err == nil {
 		t.Fatal("期望返回错误，got nil")
@@ -286,7 +329,7 @@ func TestPlanner_Run_NilBus(t *testing.T) {
 	ai := &mockAI{resp: fakeSpecBody}
 	git := &mockGittor{}
 
-	p := NewPlanner()
+	p := NewPlanner("")
 	if err := p.Run(context.Background(), w, ai, git, nil); err != nil {
 		t.Fatalf("bus=nil 时 Run 返回错误: %v", err)
 	}

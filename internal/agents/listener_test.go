@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
@@ -20,6 +21,30 @@ func (m *mockListenerAI) Ask(ctx context.Context, system, user string) (string, 
 		return "", m.err
 	}
 	return m.resp, nil
+}
+
+// AskWithModel 与 Ask 行为一致。
+func (m *mockListenerAI) AskWithModel(ctx context.Context, _, system, user string) (string, error) {
+	return m.Ask(ctx, system, user)
+}
+
+// RunStream 复用 Ask 的响应并通过 text 事件回传。
+func (m *mockListenerAI) RunStream(ctx context.Context, _, system, user string, onEvent func(aicli.RunEvent) error) (string, error) {
+	resp, err := m.Ask(ctx, system, user)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil {
+		_ = onEvent(aicli.RunEvent{Type: "system", RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "text", Content: resp, RunID: "mock"})
+		_ = onEvent(aicli.RunEvent{Type: "result", RunID: "mock"})
+	}
+	return "mock", nil
+}
+
+// GetRun 返回空 RunDetail。
+func (m *mockListenerAI) GetRun(_ context.Context, _ string) (*aicli.RunDetail, error) {
+	return &aicli.RunDetail{}, nil
 }
 
 // fakeDesireBody 模拟 AI 产出的 desire.md 正文，符合 schema 约定。
@@ -49,7 +74,7 @@ func drain(ch <-chan eventbus.Event) []eventbus.Event {
 }
 
 func TestListenerName(t *testing.T) {
-	l := NewListener()
+	l := NewListener("")
 	if got, want := l.Name(), "listener"; got != want {
 		t.Errorf("Name()=%q want=%q", got, want)
 	}
@@ -71,7 +96,7 @@ func TestListenerRunSuccess(t *testing.T) {
 	ch := bus.Subscribe()
 
 	ai := &mockListenerAI{resp: fakeDesireBody}
-	l := NewListener()
+	l := NewListener("")
 	if err := l.Run(context.Background(), ws, ai, nil, bus); err != nil {
 		t.Fatalf("Run 失败: %v", err)
 	}
@@ -96,8 +121,9 @@ func TestListenerRunSuccess(t *testing.T) {
 	}
 
 	// 验证事件序列：agent_start → doc_update → agent_done
+	// 注：agent_run_event 已被 filterLifecycleEvents 过滤。
 	var gotTypes []string
-	for _, e := range drain(ch) {
+	for _, e := range filterLifecycleEvents(drain(ch)) {
 		gotTypes = append(gotTypes, e.Type)
 	}
 	wantTypes := []string{
@@ -129,7 +155,7 @@ func TestListenerRunNoInput(t *testing.T) {
 	ch := bus.Subscribe()
 
 	ai := &mockListenerAI{resp: fakeDesireBody}
-	l := NewListener()
+	l := NewListener("")
 	err := l.Run(context.Background(), ws, ai, nil, bus)
 	if err == nil {
 		t.Fatal("期望返回错误，实际 nil")
@@ -165,7 +191,7 @@ func TestListenerRunAIFailed(t *testing.T) {
 	ch := bus.Subscribe()
 
 	ai := &mockListenerAI{err: context.DeadlineExceeded}
-	l := NewListener()
+	l := NewListener("")
 	err := l.Run(context.Background(), ws, ai, nil, bus)
 	if err == nil {
 		t.Fatal("期望返回错误，实际 nil")

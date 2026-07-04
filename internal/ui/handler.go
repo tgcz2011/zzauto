@@ -1,16 +1,26 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tgcz2011/zzauto/internal/agents"
+	"github.com/tgcz2011/zzauto/internal/aicli"
 	"github.com/tgcz2011/zzauto/internal/config"
 	"github.com/tgcz2011/zzauto/internal/eventbus"
+	"github.com/tgcz2011/zzauto/internal/ghcli"
+	"github.com/tgcz2011/zzauto/internal/orchestrator"
+	"github.com/tgcz2011/zzauto/internal/projects"
+	"github.com/tgcz2011/zzauto/internal/registry"
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
 
@@ -82,14 +92,29 @@ type askView struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Handler 是 Web UI 的 HTTP 处理器，持有事件总线、工作区与配置。
+// orchEntry 记录一个项目按需启动的 orchestrator 及其关联资源。
+type orchEntry struct {
+	orch   *orchestrator.Orchestrator
+	ws     *workspace.Workspace
+	cancel context.CancelFunc
+}
+
+// Handler 是 Web UI 的 HTTP 处理器，持有事件总线、项目注册表与配置。
 //
 // 通过订阅 bus 维护流程状态，提供 REST API 与 SSE 推送，
 // 并暴露 AskUser 方法作为 Asker agent 与浏览器交互的桥。
+//
+// v0.3.0 起 Handler 不再持有单个 ws，而是持 Registry，按当前选中项目
+// 动态创建 workspace；orchestrator 在 handleStartProject 中按需装配。
 type Handler struct {
-	bus *eventbus.Bus
-	ws  *workspace.Workspace
-	cfg *config.Config
+	bus   *eventbus.Bus
+	reg   *projects.Registry
+	cfg   *config.Config
+	aicli *aicli.Client // 用于 stats 代理
+
+	// currentMu 保护 currentID（前端切换项目时更新）。
+	currentMu sync.Mutex
+	currentID string
 
 	// mu 保护 asks 与 askSeq。
 	mu     sync.Mutex
@@ -99,19 +124,43 @@ type Handler struct {
 	// stateMu 保护 state。
 	stateMu sync.Mutex
 	state   flowState
+
+	// orchMu 保护 orchs（按需启动的 orchestrator 管理）。
+	orchMu sync.Mutex
+	orchs  map[string]*orchEntry // projectID -> 运行中的 orchestrator
 }
 
 // New 创建 Handler 并启动事件监听以维护流程状态。
-func New(bus *eventbus.Bus, ws *workspace.Workspace, cfg *config.Config) *Handler {
+func New(bus *eventbus.Bus, reg *projects.Registry, cfg *config.Config) *Handler {
 	h := &Handler{
-		bus:  bus,
-		ws:   ws,
-		cfg:  cfg,
-		asks: make(map[string]*askEntry),
+		bus:   bus,
+		reg:   reg,
+		cfg:   cfg,
+		aicli: aicli.New(cfg.AicliAddr, cfg.AicliKey),
+		asks:  make(map[string]*askEntry),
+		orchs: make(map[string]*orchEntry),
 	}
 	h.initState()
 	h.startStateListener()
 	return h
+}
+
+// setCurrent 设置当前选中项目 ID。
+func (h *Handler) setCurrent(id string) {
+	h.currentMu.Lock()
+	h.currentID = id
+	h.currentMu.Unlock()
+}
+
+// currentWS 返回当前选中项目的 workspace；未选中时返回 nil。
+func (h *Handler) currentWS() *workspace.Workspace {
+	h.currentMu.Lock()
+	id := h.currentID
+	h.currentMu.Unlock()
+	if id == "" {
+		return nil
+	}
+	return workspace.New(h.cfg.WorkspaceDir, id)
 }
 
 // initState 初始化 9 个 agent 为 pending 状态。
@@ -186,6 +235,32 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/github", h.handleGithub)
 	mux.HandleFunc("GET /api/config", h.handleConfig)
 	mux.HandleFunc("GET /api/events", h.handleEvents)
+
+	// 项目管理
+	mux.HandleFunc("GET /api/projects", h.handleListProjects)
+	mux.HandleFunc("POST /api/projects", h.handleCreateProject)
+	mux.HandleFunc("GET /api/projects/{id}", h.handleGetProject)
+	mux.HandleFunc("DELETE /api/projects/{id}", h.handleDeleteProject)
+	mux.HandleFunc("POST /api/projects/{id}/input", h.handleProjectInput)
+	mux.HandleFunc("POST /api/projects/{id}/start", h.handleStartProject)
+	mux.HandleFunc("POST /api/projects/{id}/select", h.handleSelectProject)
+
+	// gh CLI
+	mux.HandleFunc("GET /api/gh/status", h.handleGhStatus)
+	mux.HandleFunc("GET /api/gh/repos", h.handleGhRepos)
+
+	// settings
+	mux.HandleFunc("GET /api/settings/models", h.handleGetModels)
+	mux.HandleFunc("PUT /api/settings/models", h.handlePutModels)
+
+	// stats 代理
+	mux.HandleFunc("GET /api/stats/usage", h.handleStatsUsage)
+	mux.HandleFunc("GET /api/stats/summary", h.handleStatsSummary)
+	mux.HandleFunc("GET /api/stats/concurrency", h.handleStatsConcurrency)
+
+	// runs
+	mux.HandleFunc("GET /api/projects/{id}/runs", h.handleListRuns)
+	mux.HandleFunc("GET /api/projects/{id}/runs/{rid}", h.handleGetRun)
 }
 
 // AskUser 供 Asker agent 调用：发布问题并阻塞等待用户在 UI 上回答。
@@ -262,7 +337,12 @@ func (h *Handler) handleGetDoc(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "未知文档: " + name})
 		return
 	}
-	raw, err := h.ws.ReadDoc(docFile)
+	ws := h.currentWS()
+	if ws == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "未选中项目"})
+		return
+	}
+	raw, err := ws.ReadDoc(docFile)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "文档不存在", "name": name})
 		return
@@ -293,12 +373,17 @@ func (h *Handler) handleInput(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "request 不能为空"})
 		return
 	}
+	ws := h.currentWS()
+	if ws == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "未选中项目"})
+		return
+	}
 	content := workspace.RenderDoc(workspace.DocMeta{
 		Stage:     workspace.StageListener,
 		Status:    workspace.StatusPending,
 		UpdatedAt: time.Now(),
 	}, body.Request)
-	if err := h.ws.WriteDoc("input.md", content); err != nil {
+	if err := ws.WriteDoc("input.md", content); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
@@ -441,4 +526,376 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ===== 项目管理 =====
+
+// handleListProjects 返回全部项目列表与当前选中项目 ID。
+func (h *Handler) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	metas, err := h.reg.List()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	h.currentMu.Lock()
+	current := h.currentID
+	h.currentMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects": metas,
+		"current":  current,
+	})
+}
+
+// handleCreateProject 创建新项目并自动选中。
+func (h *Handler) handleCreateProject(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name   string `json:"name"`
+		Repo   string `json:"repo"`
+		Branch string `json:"branch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name 不能为空"})
+		return
+	}
+	meta, err := h.reg.Create(body.Name, body.Repo, body.Branch)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	h.setCurrent(meta.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"project": meta})
+}
+
+// handleGetProject 返回单个项目元数据。
+func (h *Handler) handleGetProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	meta, err := h.reg.Get(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"project": meta})
+}
+
+// handleDeleteProject 删除项目。若为当前选中项目则清空选中。
+func (h *Handler) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := h.reg.Delete(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	h.currentMu.Lock()
+	if h.currentID == id {
+		h.currentID = ""
+	}
+	h.currentMu.Unlock()
+	// 同时停止该项目运行中的 orchestrator
+	h.stopOrch(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleProjectInput 写入指定项目的 input.md（带 frontmatter）。
+func (h *Handler) handleProjectInput(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := h.reg.Get(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	var body struct {
+		Request string `json:"request"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(body.Request) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "request 不能为空"})
+		return
+	}
+	ws := workspace.New(h.cfg.WorkspaceDir, id)
+	content := workspace.RenderDoc(workspace.DocMeta{
+		Stage:     workspace.StageListener,
+		Status:    workspace.StatusPending,
+		UpdatedAt: time.Now(),
+	}, body.Request)
+	if err := ws.WriteDoc("input.md", content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleStartProject 为指定项目按需装配 orchestrator 并启动。
+// 若该项目已有运行中 orchestrator，返回 409 Conflict。
+func (h *Handler) handleStartProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := h.reg.Get(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	h.orchMu.Lock()
+	if _, exists := h.orchs[id]; exists {
+		h.orchMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "该项目已有运行中的编排器"})
+		return
+	}
+	h.orchMu.Unlock()
+
+	ws := workspace.New(h.cfg.WorkspaceDir, id)
+	if err := ws.EnsureDirs(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	askFunc := agents.AskFunc(func(ctx context.Context, question string) (string, error) {
+		return h.AskUser(question)
+	})
+	orch, err := registry.BuildOrchestrator(h.cfg, ws, h.bus, askFunc)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.orchMu.Lock()
+	h.orchs[id] = &orchEntry{orch: orch, ws: ws, cancel: cancel}
+	h.orchMu.Unlock()
+
+	go func() {
+		if err := orch.Run(ctx); err != nil {
+			h.bus.Publish(eventbus.Event{
+				Type:  eventbus.EventLog,
+				Agent: "orchestrator",
+				Data:  fmt.Sprintf("项目 %s 编排器退出: %v", id, err),
+			})
+		}
+		cancel()
+		h.orchMu.Lock()
+		delete(h.orchs, id)
+		h.orchMu.Unlock()
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSelectProject 切换当前选中项目。
+func (h *Handler) handleSelectProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := h.reg.Get(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	h.setCurrent(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "current": id})
+}
+
+// stopOrch 停止并移除指定项目的 orchestrator（若存在）。
+func (h *Handler) stopOrch(id string) {
+	h.orchMu.Lock()
+	entry, ok := h.orchs[id]
+	if ok {
+		delete(h.orchs, id)
+	}
+	h.orchMu.Unlock()
+	if ok {
+		entry.cancel()
+	}
+}
+
+// ===== gh CLI =====
+
+// handleGhStatus 返回 gh CLI 安装与登录状态。
+func (h *Handler) handleGhStatus(w http.ResponseWriter, r *http.Request) {
+	installed := true
+	installHint := ""
+	if err := ghcli.EnsureInstalled(); err != nil {
+		installed = false
+		installHint = err.Error()
+	}
+	loggedIn := false
+	loginHint := ""
+	if installed {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		ok, err := ghcli.AuthStatus(ctx)
+		cancel()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		loggedIn = ok
+		if !loggedIn {
+			loginHint = ghcli.LoginHint()
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installed":    installed,
+		"logged_in":    loggedIn,
+		"install_hint": installHint,
+		"login_hint":   loginHint,
+	})
+}
+
+// handleGhRepos 拉取当前登录用户的仓库列表。
+func (h *Handler) handleGhRepos(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	repos, err := ghcli.Repos(ctx)
+	if err != nil {
+		if errors.Is(err, ghcli.ErrNotAuthenticated) {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":       err.Error(),
+				"login_hint":  ghcli.LoginHint(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
+}
+
+// ===== settings =====
+
+// handleGetModels 返回当前角色模型配置与默认模型。
+func (h *Handler) handleGetModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"models":  h.cfg.RoleModels,
+		"default": aicli.DefaultModel,
+	})
+}
+
+// handlePutModels 更新角色模型配置并落盘 zzauto.yaml。
+func (h *Handler) handlePutModels(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Models map[string]string `json:"models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求体格式错误"})
+		return
+	}
+	h.cfg.RoleModels = body.Models
+	if err := h.cfg.Save("zzauto.yaml"); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ===== stats 代理 =====
+
+// handleStatsUsage 代理 aiclibridge /v1/stats/usage。
+func (h *Handler) handleStatsUsage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	resp, err := h.aicli.Usage(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleStatsSummary 代理 aiclibridge /v1/stats/summary。
+func (h *Handler) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	resp, err := h.aicli.Summary(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleStatsConcurrency 代理 aiclibridge /v1/stats/concurrency。
+func (h *Handler) handleStatsConcurrency(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	resp, err := h.aicli.Concurrency(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ===== runs =====
+
+// runSummary 单个 run 的摘要信息（用于列表展示）。
+type runSummary struct {
+	ID        string `json:"id"`
+	Agent     string `json:"agent"`
+	File      string `json:"file"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// handleListRuns 扫描指定项目 runs/*/*.json 返回 run 摘要列表。
+func (h *Handler) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := h.reg.Get(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	runsDir := filepath.Join(h.reg.ProjectDir(id), "runs")
+	agentDirs, err := os.ReadDir(runsDir)
+	if err != nil {
+		// runs 目录不存在视为空列表
+		writeJSON(w, http.StatusOK, map[string]any{"runs": []runSummary{}})
+		return
+	}
+	runs := make([]runSummary, 0)
+	for _, ad := range agentDirs {
+		if !ad.IsDir() {
+			continue
+		}
+		agent := ad.Name()
+		pattern := filepath.Join(runsDir, agent, "*.json")
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			fi, err := os.Stat(m)
+			if err != nil {
+				continue
+			}
+			runID := strings.TrimSuffix(filepath.Base(m), ".json")
+			runs = append(runs, runSummary{
+				ID:        runID,
+				Agent:     agent,
+				File:      filepath.Join("runs", agent, filepath.Base(m)),
+				CreatedAt: fi.ModTime().Unix(),
+			})
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].CreatedAt > runs[j].CreatedAt })
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// handleGetRun 读取指定项目指定 run 的完整 JSON 内容。
+func (h *Handler) handleGetRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rid := r.PathValue("rid")
+	if _, err := h.reg.Get(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "项目不存在", "id": id})
+		return
+	}
+	pattern := filepath.Join(h.reg.ProjectDir(id), "runs", "*", rid+".json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "run 不存在", "id": rid})
+		return
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

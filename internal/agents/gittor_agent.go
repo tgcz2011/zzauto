@@ -21,11 +21,13 @@ import (
 // 该 agent 不持有状态，git 客户端由编排器通过 Run 参数注入（与其他 agent
 // 保持一致）。Run 时读取 spec.md 确认所有 Requirement 已打勾，再调用
 // git.CommitAndPush 提交 code/ 目录。
-type GittorAgent struct{}
+type GittorAgent struct {
+	model string // 保留字段以与其他 agent 构造签名一致；Gittor 不调用 AI
+}
 
-// NewGittorAgent 构造一个 GittorAgent 实例。
-func NewGittorAgent() *GittorAgent {
-	return &GittorAgent{}
+// NewGittorAgent 构造一个 GittorAgent 实例。model 仅为签名一致性保留，本 agent 不调用 AI。
+func NewGittorAgent(model string) *GittorAgent {
+	return &GittorAgent{model: model}
 }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageGittor 对应。

@@ -97,9 +97,15 @@ type openaiResponse struct {
 
 // Chat 调用 OpenAI 兼容接口 /v1/chat/completions。
 // system 为系统提示，user 为用户输入，返回助手回复文本。
+// 使用 c.model 作为请求模型。
 func (c *Client) Chat(ctx context.Context, system, user string) (string, error) {
+	return c.chatWithModel(ctx, c.model, system, user)
+}
+
+// chatWithModel 是 Chat 与 ChatWithModel 的共享实现，model 为本次请求使用的模型。
+func (c *Client) chatWithModel(ctx context.Context, model, system, user string) (string, error) {
 	reqBody := openaiRequest{
-		Model: c.model,
+		Model: model,
 		Messages: []openaiMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -120,6 +126,21 @@ func (c *Client) Chat(ctx context.Context, system, user string) (string, error) 
 		return "", fmt.Errorf("aiclibridge 返回空 choices (body=%s)", string(data))
 	}
 	return resp.Choices[0].Message.Content, nil
+}
+
+// ChatWithModel 与 Chat 相同，但用传入 model 覆盖本次请求使用的模型（不修改 c.model）。
+func (c *Client) ChatWithModel(ctx context.Context, model, system, user string) (string, error) {
+	return c.chatWithModel(ctx, model, system, user)
+}
+
+// SetModel 设置客户端默认模型。
+func (c *Client) SetModel(model string) {
+	c.model = model
+}
+
+// Model 返回客户端当前默认模型。
+func (c *Client) Model() string {
+	return c.model
 }
 
 // anthropicMessage Anthropic 兼容接口的消息结构。
@@ -179,6 +200,11 @@ func (c *Client) Messages(ctx context.Context, system, user string) (string, err
 // 该方法满足编排器 agents.AIClient 接口约定（鸭子类型，无需显式声明）。
 func (c *Client) Ask(ctx context.Context, system, user string) (string, error) {
 	return c.Chat(ctx, system, user)
+}
+
+// AskWithModel 与 Ask 相同，但用传入 model 覆盖本次请求使用的模型（委托 ChatWithModel）。
+func (c *Client) AskWithModel(ctx context.Context, model, system, user string) (string, error) {
+	return c.ChatWithModel(ctx, model, system, user)
 }
 
 // doJSON 发送 JSON 请求并返回响应体。

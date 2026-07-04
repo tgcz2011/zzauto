@@ -27,10 +27,12 @@ const dealReviewDoc = "deal_review.md"
 //
 // 产出的 deal.md 以 StatusRunning 表示草案状态；Evaluator 共识后由其
 // 改为 StatusDone。Designer 自身不负责标记完成。
-type Designer struct{}
+type Designer struct {
+	model string // 该角色配置的模型，空则用 aicli 默认
+}
 
-// NewDesigner 构造一个 Designer 实例。
-func NewDesigner() *Designer { return &Designer{} }
+// NewDesigner 构造一个 Designer 实例。model 为该角色配置的模型名，空串表示用默认。
+func NewDesigner(model string) *Designer { return &Designer{model: model} }
 
 // Name 返回 agent 标识，与 workspace 阶段常量 StageDesigner 对应。
 func (d *Designer) Name() string { return workspace.StageDesigner }
@@ -119,7 +121,7 @@ func (d *Designer) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient
 
 	// 5. 拼装上下文并调用 AI
 	combined := d.buildContext(specContent, prevDeal, hasPrevDeal, review, hasReview)
-	dealBody, err := ai.Ask(ctx, designerSystemPrompt, combined)
+	dealBody, _, err := RunWithTracking(ctx, ws, bus, ai, d.Name(), d.model, designerSystemPrompt, combined)
 	if err != nil {
 		failErr := fmt.Errorf("调用 AI 生成 deal 失败: %w", err)
 		publishEvent(bus, eventbus.EventAgentFailed, d.Name(), map[string]any{
