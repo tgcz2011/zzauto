@@ -34,6 +34,12 @@ const I18N = {
     'flow.title': '流程步骤',
     'flow.selectFirst': '请先选择或创建项目',
     'flow.startOrch': '启动编排',
+    'flow.pause': '暂停',
+    'flow.resume': '继续',
+    'flow.stop': '终止',
+    'flow.paused': '已暂停',
+    'flow.running': '运行中',
+    'flow.idle': '未启动',
     'doc.viewer': '文档查看器',
     'doc.empty': '暂无内容',
     'doc.selectProject': '请先选择项目',
@@ -47,6 +53,25 @@ const I18N = {
     'ask.placeholder': '输入回答...',
     'ask.answer': '回答',
     'ask.empty': '暂无待答问题',
+    'req.title': '追加新需求（异步）',
+    'req.placeholder': '随时补充新需求，Mixor 会判定是否冲突，未冲突则合并到 spec，冲突则回退到 Analyst 重跑...',
+    'req.submit': '追加',
+    'req.queue': '需求队列快照',
+    'req.empty': '（空）',
+    'files.title': '文件浏览',
+    'files.empty': '该目录无文件',
+    'files.up': '上级',
+    'files.refresh': '刷新',
+    'files.preview': '预览',
+    'files.back': '返回列表',
+    'pm.title': '项目级模型覆盖',
+    'pm.hint': '留空继承全局；修改后下次该角色被调用时生效（无需重启）',
+    'pm.inherit': '继承全局',
+    'pm.saved': '已保存 ✓',
+    'pm.save': '保存',
+    'np.localDir': '本地目录（可选）',
+    'np.localDirPlaceholder': '/path/to/local/dir',
+    'np.localDirHint': '非空时 workspace 直接指向该目录，便于查看/编辑本地代码；删除项目不会删除该目录',
     'github.title': 'GitHub 配置覆盖（可选）',
     'github.hint': '默认由 gh CLI 管理 GitHub 鉴权；以下字段仅在需要覆盖远端或分支时填写。',
     'github.remote': 'Remote',
@@ -105,6 +130,7 @@ const I18N = {
     'st.running': '运行中',
     'st.done': '完成',
     'st.failed': '失败',
+    'st.paused': '已暂停',
     'msg.confirmDelete': '确认删除该项目？该操作不可恢复。',
     'msg.nameRequired': '请填写项目名称',
     'msg.createFailed': '创建失败: ',
@@ -114,6 +140,12 @@ const I18N = {
     'msg.selectProject': '请先选择项目',
     'msg.submitFailed': '提交失败: ',
     'msg.saveFailed': '保存失败: ',
+    'msg.pauseFailed': '暂停失败: ',
+    'msg.stopFailed': '停止失败: ',
+    'msg.resumeFailed': '继续失败: ',
+    'msg.reqFailed': '追加需求失败: ',
+    'msg.notRunning': '项目未运行',
+    'msg.confirmStop': '确认终止当前任务？已完成的阶段会保留，但运行中的编排器将立即停止。',
     'lang.label': '语言',
     'theme.label': '主题',
     'theme.toggleLight': '切换到浅色',
@@ -141,6 +173,12 @@ const I18N = {
     'flow.title': 'Workflow Steps',
     'flow.selectFirst': 'Please select or create a project first',
     'flow.startOrch': 'Start Orchestration',
+    'flow.pause': 'Pause',
+    'flow.resume': 'Resume',
+    'flow.stop': 'Stop',
+    'flow.paused': 'Paused',
+    'flow.running': 'Running',
+    'flow.idle': 'Idle',
     'doc.viewer': 'Document Viewer',
     'doc.empty': 'No content',
     'doc.selectProject': 'Please select a project first',
@@ -154,6 +192,25 @@ const I18N = {
     'ask.placeholder': 'Enter answer...',
     'ask.answer': 'Answer',
     'ask.empty': 'No pending questions',
+    'req.title': 'Append New Requirement (async)',
+    'req.placeholder': 'Add new requirements anytime; Mixor decides: no conflict -> merge into spec, conflict -> rerun from Analyst',
+    'req.submit': 'Append',
+    'req.queue': 'Requirements Queue Snapshot',
+    'req.empty': '(empty)',
+    'files.title': 'File Browser',
+    'files.empty': 'No files in this directory',
+    'files.up': 'Up',
+    'files.refresh': 'Refresh',
+    'files.preview': 'Preview',
+    'files.back': 'Back to list',
+    'pm.title': 'Project-level Model Override',
+    'pm.hint': 'Empty = inherit global; changes take effect on next agent invocation (no restart needed)',
+    'pm.inherit': 'Inherit global',
+    'pm.saved': 'Saved ✓',
+    'pm.save': 'Save',
+    'np.localDir': 'Local Dir (optional)',
+    'np.localDirPlaceholder': '/path/to/local/dir',
+    'np.localDirHint': 'When set, workspace points to this dir for easy view/edit; deleting the project will NOT delete this dir',
     'github.title': 'GitHub Config Override (optional)',
     'github.hint': 'GitHub auth is managed by gh CLI by default; fill these fields only when overriding remote or branch.',
     'github.remote': 'Remote',
@@ -212,6 +269,7 @@ const I18N = {
     'st.running': 'Running',
     'st.done': 'Done',
     'st.failed': 'Failed',
+    'st.paused': 'Paused',
     'msg.confirmDelete': 'Are you sure you want to delete this project? This action cannot be undone.',
     'msg.nameRequired': 'Please enter a project name',
     'msg.createFailed': 'Create failed: ',
@@ -221,6 +279,12 @@ const I18N = {
     'msg.selectProject': 'Please select a project first',
     'msg.submitFailed': 'Submit failed: ',
     'msg.saveFailed': 'Save failed: ',
+    'msg.pauseFailed': 'Pause failed: ',
+    'msg.stopFailed': 'Stop failed: ',
+    'msg.resumeFailed': 'Resume failed: ',
+    'msg.reqFailed': 'Append requirement failed: ',
+    'msg.notRunning': 'Project not running',
+    'msg.confirmStop': 'Stop the current task? Completed stages are preserved, but the running orchestrator will be terminated immediately.',
     'lang.label': 'Language',
     'theme.label': 'Theme',
     'theme.toggleLight': 'Switch to light',
@@ -260,15 +324,12 @@ function appData() {
     // ---- 全局 ----
     page: 'projects',
     agents: [
-      { stage: 'listener', name: 'Listener 倾听者' },
-      { stage: 'asker', name: 'Asker 询问者' },
-      { stage: 'planner', name: 'Planner 规划者' },
-      { stage: 'designer', name: 'Designer 设计者' },
-      { stage: 'evaluator', name: 'Evaluator 评估者' },
-      { stage: 'manager', name: 'Manager 管理者' },
-      { stage: 'executor', name: 'Executor 执行者' },
-      { stage: 'generator', name: 'Generator 生成者' },
-      { stage: 'gittor', name: 'Gittor 提交者' },
+      { stage: 'analyst',   name: 'Analyst 分析者' },
+      { stage: 'architect', name: 'Architect 架构师' },
+      { stage: 'planner',   name: 'Planner 规划者' },
+      { stage: 'coder',     name: 'Coder 编写者' },
+      { stage: 'reviewer',  name: 'Reviewer 审查者' },
+      { stage: 'mixor',     name: 'Mixor 融合者' },
     ],
 
     // ---- 项目 ----
@@ -276,10 +337,10 @@ function appData() {
     currentID: null,
     currentProject: null,
 
-    // ---- v0.2.0 流程/文档/问答/输入/GitHub ----
+    // ---- 流程/文档/问答/输入/GitHub ----
     state: { stage: '', agents: [] },
     docs: {},
-    selectedDoc: 'desire',
+    selectedDoc: 'input',
     asks: [],
     answerInputs: {},
     inputRequest: '',
@@ -288,15 +349,34 @@ function appData() {
 
     // ---- 新建项目弹窗 ----
     showNewProject: false,
-    newProject: { name: '', repo: '', branch: 'main' },
+    newProject: { name: '', repo: '', branch: 'main', localDir: '' },
     ghRepos: [],
     ghReposError: '',
 
-    // ---- 设置 ----
+    // ---- 设置（全局） ----
     roleModels: {},
     defaultModel: '',
     settingsSaved: false,
     availableModels: [],  // 来自 /api/aicli/models
+
+    // ---- 项目控制（暂停/停止/继续）----
+    // orchState 由 SSE 与定时轮询刷新：running / paused / stopped
+    orchState: { running: false, paused: false },
+
+    // ---- 文件浏览 ----
+    filesPath: '.',     // 当前浏览的相对路径
+    filesEntries: [],   // 当前路径下的文件/目录列表
+    filePreview: '',    // 当前预览的文件内容
+    filePreviewName: '',
+
+    // ---- 异步需求队列 ----
+    newRequirement: '',
+    reqQueue: '',       // requirements_queue.md 内容快照
+
+    // ---- 项目级模型 ----
+    projectModels: {},      // 项目级覆盖
+    projectModelsGlobal: {},// 全局配置（用于参考）
+    projectModelsSaved: false,
 
     // ---- 统计 ----
     stats: { summary: {}, usage: {}, concurrency: {} },
@@ -304,7 +384,7 @@ function appData() {
     _statsTimer: null,
 
     // ---- 任务面板 ----
-    taskAgent: 'listener',
+    taskAgent: 'analyst',
     taskRuns: [],
     taskRunDetail: null,    // 可能是数组或 {events:[...]} 或 {run:{events:[...]}}
     selectedRunID: null,
@@ -317,10 +397,14 @@ function appData() {
       await this.loadProjects();
       await this.loadModels();
       await this.loadAvailableModels();
-      // 定时轮询 v0.2.0 状态。
+      // 定时轮询状态。
       setInterval(() => this.fetchState(), 2000);
       setInterval(() => this.fetchAsks(), 2000);
       setInterval(() => this.fetchDoc(this.selectedDoc), 3000);
+      // 定时刷新项目状态（用于检测 running/paused 切换）。
+      setInterval(() => {
+        this.loadProjects();
+      }, 5000);
       // 默认拉一次统计（失败不影响主流程）。
       this.loadStats().catch(() => {});
     },
@@ -350,12 +434,16 @@ function appData() {
             // 首次进入若无选中项目，自动选第一个并通知后端。
             await this.selectProject(this.projects[0].id);
           }
-          // 切换/加载项目后刷新 v0.2.0 视图。
+          // 切换/加载项目后刷新视图。
           if (this.currentID) {
             this.fetchState();
             this.fetchDoc(this.selectedDoc);
             this.fetchAsks();
             this.fetchConfig();
+            this.refreshOrchState();
+            this.loadFiles();
+            this.loadReqQueue();
+            this.loadProjectModels();
           }
         }
       } catch (e) { /* 忽略瞬时网络错误 */ }
@@ -376,10 +464,20 @@ function appData() {
           this.taskRuns = [];
           this.taskRunDetail = null;
           this.selectedRunID = null;
+          this.filesPath = '.';
+          this.filesEntries = [];
+          this.filePreview = '';
+          this.filePreviewName = '';
+          this.newRequirement = '';
+          this.reqQueue = '';
           this.fetchState();
           this.fetchDoc(this.selectedDoc);
           this.fetchAsks();
           this.fetchConfig();
+          this.refreshOrchState();
+          this.loadFiles();
+          this.loadReqQueue();
+          this.loadProjectModels();
         }
       } catch (e) { /* 忽略 */ }
     },
@@ -398,6 +496,7 @@ function appData() {
             name: np.name.trim(),
             repo: np.repo.trim(),
             branch: np.branch.trim() || 'main',
+            local_dir: np.localDir.trim(),
           }),
         });
         if (r.ok) {
@@ -408,6 +507,7 @@ function appData() {
             this.fetchState();
             this.fetchDoc(this.selectedDoc);
             this.fetchAsks();
+            this.loadFiles();
           }
         } else {
           const j = await r.json().catch(() => ({}));
@@ -444,7 +544,7 @@ function appData() {
 
     // ====== 新建项目弹窗 + gh repos ======
     async openNewProject() {
-      this.newProject = { name: '', repo: '', branch: 'main' };
+      this.newProject = { name: '', repo: '', branch: 'main', localDir: '' };
       this.showNewProject = true;
       await this.loadGhRepos();
     },
@@ -483,6 +583,7 @@ function appData() {
         });
         if (r.ok) {
           this.fetchState();
+          this.refreshOrchState();
         } else if (r.status === 409) {
           alert(this.t('msg.orchRunning'));
         } else {
@@ -492,6 +593,216 @@ function appData() {
       } catch (e) {
         alert(this.t('msg.startFailed') + e.message);
       }
+    },
+
+    // ====== 控制编排：暂停/停止/继续 ======
+    // orchState 通过 currentProject.status 与 SSE 事件推断：
+    //   running / paused / failed / pending / done
+    refreshOrchState() {
+      const s = this.currentProject?.status;
+      this.orchState.running = (s === 'running' || s === 'paused');
+      this.orchState.paused = (s === 'paused');
+    },
+
+    orchStatusBadge() {
+      const s = this.currentProject?.status;
+      if (s === 'running') return this.t('flow.running');
+      if (s === 'paused') return this.t('flow.paused');
+      return this.t('flow.idle');
+    },
+
+    async pauseOrchestrator() {
+      if (!this.currentID) return;
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/pause', { method: 'POST' });
+        if (r.ok) {
+          await this.loadProjects();
+        } else {
+          const j = await r.json().catch(() => ({}));
+          alert(this.t('msg.pauseFailed') + (j.error || r.status));
+        }
+      } catch (e) {
+        alert(this.t('msg.pauseFailed') + e.message);
+      }
+    },
+
+    async resumeOrchestrator() {
+      if (!this.currentID) return;
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/resume', { method: 'POST' });
+        if (r.ok) {
+          await this.loadProjects();
+        } else {
+          const j = await r.json().catch(() => ({}));
+          alert(this.t('msg.resumeFailed') + (j.error || r.status));
+        }
+      } catch (e) {
+        alert(this.t('msg.resumeFailed') + e.message);
+      }
+    },
+
+    async stopOrchestrator() {
+      if (!this.currentID) return;
+      if (!confirm(this.t('msg.confirmStop'))) return;
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/stop', { method: 'POST' });
+        if (r.ok) {
+          await this.loadProjects();
+        } else {
+          const j = await r.json().catch(() => ({}));
+          alert(this.t('msg.stopFailed') + (j.error || r.status));
+        }
+      } catch (e) {
+        alert(this.t('msg.stopFailed') + e.message);
+      }
+    },
+
+    // ====== 文件浏览 ======
+    async loadFiles(path) {
+      if (!this.currentID) {
+        this.filesEntries = [];
+        return;
+      }
+      if (path !== undefined) this.filesPath = path;
+      try {
+        const url = '/api/projects/' + encodeURIComponent(this.currentID) +
+                    '/files?path=' + encodeURIComponent(this.filesPath);
+        const r = await fetch(url);
+        if (r.ok) {
+          const j = await r.json();
+          this.filesEntries = j.files || [];
+        } else {
+          this.filesEntries = [];
+        }
+      } catch (e) {
+        this.filesEntries = [];
+      }
+    },
+
+    filesUpPath() {
+      if (this.filesPath === '.' || this.filesPath === '') return '.';
+      const parts = this.filesPath.split('/');
+      parts.pop();
+      return parts.length === 0 ? '.' : parts.join('/');
+    },
+
+    openDir(name) {
+      const next = this.filesPath === '.' ? name : this.filesPath + '/' + name;
+      this.loadFiles(next);
+    },
+
+    async previewFile(name) {
+      if (!this.currentID) return;
+      const rel = this.filesPath === '.' ? name : this.filesPath + '/' + name;
+      try {
+        const url = '/api/projects/' + encodeURIComponent(this.currentID) +
+                    '/file?path=' + encodeURIComponent(rel);
+        const r = await fetch(url);
+        if (r.ok) {
+          const j = await r.json();
+          this.filePreviewName = rel;
+          const trunc = j.truncated ? '\n\n…（文件已截断，仅显示前 256KB）' : '';
+          this.filePreview = (j.content || '') + trunc;
+        } else {
+          const j = await r.json().catch(() => ({}));
+          this.filePreviewName = rel;
+          this.filePreview = '预览失败: ' + (j.error || r.status);
+        }
+      } catch (e) {
+        this.filePreview = '预览失败: ' + e.message;
+      }
+    },
+
+    closeFilePreview() {
+      this.filePreview = '';
+      this.filePreviewName = '';
+    },
+
+    // ====== 异步需求队列 ======
+    async loadReqQueue() {
+      if (!this.currentID) {
+        this.reqQueue = '';
+        return;
+      }
+      try {
+        const r = await fetch('/api/docs/queue');
+        if (r.ok) {
+          const j = await r.json();
+          this.reqQueue = j.body || j.raw || '';
+        } else {
+          this.reqQueue = '';
+        }
+      } catch (e) {
+        this.reqQueue = '';
+      }
+    },
+
+    async submitRequirement() {
+      if (!this.currentID) {
+        alert(this.t('msg.selectProject'));
+        return;
+      }
+      if (!this.newRequirement.trim()) return;
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/requirement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request: this.newRequirement }),
+        });
+        if (r.ok) {
+          this.newRequirement = '';
+          this.loadReqQueue();
+        } else {
+          const j = await r.json().catch(() => ({}));
+          alert(this.t('msg.reqFailed') + (j.error || r.status));
+        }
+      } catch (e) {
+        alert(this.t('msg.reqFailed') + e.message);
+      }
+    },
+
+    // ====== 项目级模型 ======
+    async loadProjectModels() {
+      if (!this.currentID) {
+        this.projectModels = {};
+        this.projectModelsGlobal = {};
+        return;
+      }
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/models');
+        if (r.ok) {
+          const j = await r.json();
+          // 深拷贝避免双向绑定改到全局视图
+          this.projectModels = { ...(j.models || {}) };
+          this.projectModelsGlobal = { ...(j.global || {}) };
+          this.projectModelsSaved = false;
+        }
+      } catch (e) { /* 忽略 */ }
+    },
+
+    async saveProjectModels() {
+      if (!this.currentID) return;
+      try {
+        const r = await fetch('/api/projects/' + encodeURIComponent(this.currentID) + '/models', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: this.projectModels }),
+        });
+        if (r.ok) {
+          this.projectModelsSaved = true;
+          setTimeout(() => { this.projectModelsSaved = false; }, 2000);
+        } else {
+          const j = await r.json().catch(() => ({}));
+          alert(this.t('msg.saveFailed') + (j.error || r.status));
+        }
+      } catch (e) {
+        alert(this.t('msg.saveFailed') + e.message);
+      }
+    },
+
+    // 返回某 stage 的全局模型（用于显示"继承全局"提示）
+    inheritedModel(stage) {
+      return this.projectModelsGlobal[stage] || this.defaultModel || 'claude/anthropic/claude-sonnet-4.5';
     },
 
     // ====== v0.2.0 输入/文档/Asker/GitHub ======
@@ -510,7 +821,7 @@ function appData() {
         });
         if (r.ok) {
           this.inputRequest = '';
-          this.fetchDoc('desire');
+          this.fetchDoc('input');
         } else {
           const j = await r.json().catch(() => ({}));
           alert(this.t('msg.submitFailed') + (j.error || r.status));
@@ -771,6 +1082,16 @@ function appData() {
             if (evt.type === 'doc_update') {
               this.fetchDoc(this.selectedDoc);
             }
+            // 编排器暂停/恢复/停止事件：刷新项目状态
+            if (evt.type === 'orch_paused' || evt.type === 'orch_resumed' || evt.type === 'orch_stopped') {
+              this.loadProjects();
+            }
+            // Mixor 处理需求队列后：刷新队列与文档视图
+            if (evt.type === 'agent_done' && evt.agent === 'mixor') {
+              this.loadReqQueue();
+              this.fetchDoc('spec');
+              this.fetchDoc('progress');
+            }
           }
         } catch (err) { /* 忽略解析错误 */ }
       };
@@ -782,29 +1103,36 @@ function appData() {
 
     // ====== 样式/格式化辅助 ======
     projectStatusClass(s) {
-      if (s === 'running') return 'bg-blue-100 text-blue-700';
-      if (s === 'done') return 'bg-green-100 text-green-700';
-      if (s === 'failed') return 'bg-red-100 text-red-700';
-      return 'bg-gray-100 text-gray-600';
+      if (s === 'running') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+      if (s === 'paused') return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300';
+      if (s === 'done') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300';
+      if (s === 'failed') return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
     },
     stageBadgeClass(stage) {
-      if (!stage) return 'bg-gray-200 text-gray-600';
-      return 'bg-blue-100 text-blue-700';
+      if (!stage) return 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
     },
     agentRowClass(a) {
-      if (a.status === 'running') return 'bg-blue-50';
-      if (a.status === 'done') return 'bg-green-50';
-      if (a.status === 'failed') return 'bg-red-50';
+      if (a.status === 'running') return 'bg-blue-50 dark:bg-blue-900/20';
+      if (a.status === 'done') return 'bg-green-50 dark:bg-green-900/20';
+      if (a.status === 'failed') return 'bg-red-50 dark:bg-red-900/20';
       return '';
     },
     agentDotClass(a) {
       if (a.status === 'running') return 'bg-blue-600 text-white animate-pulse';
       if (a.status === 'done') return 'bg-green-600 text-white';
       if (a.status === 'failed') return 'bg-red-600 text-white';
-      return 'bg-gray-300 text-gray-600';
+      return 'bg-gray-300 text-gray-600 dark:bg-gray-600 dark:text-gray-200';
     },
     statusLabel(s) {
-      const map = { pending: this.t('st.pending'), running: this.t('st.running'), done: this.t('st.done'), failed: this.t('st.failed') };
+      const map = {
+        pending: this.t('st.pending'),
+        running: this.t('st.running'),
+        done: this.t('st.done'),
+        failed: this.t('st.failed'),
+        paused: this.t('st.paused'),
+      };
       return map[s] || s;
     },
     eventClass(ev) {

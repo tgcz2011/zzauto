@@ -12,7 +12,7 @@ import (
 
 func TestCreate(t *testing.T) {
 	r := New(t.TempDir())
-	meta, err := r.Create("my-proj", "owner/repo", "")
+	meta, err := r.Create("my-proj", "owner/repo", "", "")
 	if err != nil {
 		t.Fatalf("Create 失败: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCreate(t *testing.T) {
 func TestList(t *testing.T) {
 	r := New(t.TempDir())
 	for i := 0; i < 3; i++ {
-		if _, err := r.Create("proj", "o/r", "main"); err != nil {
+		if _, err := r.Create("proj", "o/r", "main", ""); err != nil {
 			t.Fatalf("Create #%d 失败: %v", i, err)
 		}
 		time.Sleep(time.Millisecond) // 确保 CreatedAt 严格递增
@@ -91,7 +91,7 @@ func TestList(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	r := New(t.TempDir())
-	meta, err := r.Create("p", "o/r", "dev")
+	meta, err := r.Create("p", "o/r", "dev", "")
 	if err != nil {
 		t.Fatalf("Create 失败: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestGet(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	r := New(t.TempDir())
-	meta, err := r.Create("p", "o/r", "main")
+	meta, err := r.Create("p", "o/r", "main", "")
 	if err != nil {
 		t.Fatalf("Create 失败: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestUpdate(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	r := New(t.TempDir())
-	meta, err := r.Create("p", "o/r", "main")
+	meta, err := r.Create("p", "o/r", "main", "")
 	if err != nil {
 		t.Fatalf("Create 失败: %v", err)
 	}

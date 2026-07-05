@@ -32,11 +32,11 @@ func TestWriteAndReadDoc(t *testing.T) {
 	if err := w.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs 失败: %v", err)
 	}
-	content := "# desire\n用户原始欲望\n"
-	if err := w.WriteDoc(DocDesire, content); err != nil {
+	content := "# input\n用户原始欲望\n"
+	if err := w.WriteDoc(DocInput, content); err != nil {
 		t.Fatalf("WriteDoc 失败: %v", err)
 	}
-	got, err := w.ReadDoc(DocDesire)
+	got, err := w.ReadDoc(DocInput)
 	if err != nil {
 		t.Fatalf("ReadDoc 失败: %v", err)
 	}
@@ -44,14 +44,14 @@ func TestWriteAndReadDoc(t *testing.T) {
 		t.Errorf("ReadDoc 内容不匹配:\n got=%q\nwant=%q", got, content)
 	}
 	// DocPath 指向项目目录下的文件
-	if got, want := w.DocPath(DocDesire), filepath.Join(w.Path(), DocDesire); got != want {
+	if got, want := w.DocPath(DocInput), filepath.Join(w.Path(), DocInput); got != want {
 		t.Errorf("DocPath=%s, want=%s", got, want)
 	}
 }
 
 func TestDocRoundTrip(t *testing.T) {
 	meta := DocMeta{
-		Stage:     StageListener,
+		Stage:     StageAnalyst,
 		Status:    StatusDone,
 		UpdatedAt: time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
 	}

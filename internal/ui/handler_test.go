@@ -23,7 +23,7 @@ func newTestHandler(t *testing.T) (*Handler, *eventbus.Bus, *workspace.Workspace
 	bus := eventbus.New()
 	tmpDir := t.TempDir()
 	reg := projects.New(tmpDir)
-	meta, err := reg.Create("test", "owner/repo", "main")
+	meta, err := reg.Create("test", "owner/repo", "main", "")
 	if err != nil {
 		t.Fatalf("reg.Create: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestInputWritesDoc(t *testing.T) {
 	if !strings.Contains(content, "做一个 todo 应用") {
 		t.Fatalf("内容未包含需求: %s", content)
 	}
-	if !strings.Contains(content, "stage: listener") {
+	if !strings.Contains(content, "stage: analyst") {
 		t.Fatalf("缺少 frontmatter stage: %s", content)
 	}
 	if !strings.Contains(content, "status: pending") {
@@ -78,11 +78,11 @@ func TestInputEmpty(t *testing.T) {
 // TestGetDoc 验证 GET /api/docs/{name} 返回文档内容。
 func TestGetDoc(t *testing.T) {
 	h, _, ws := newTestHandler(t)
-	if err := ws.WriteDoc(workspace.DocDesire, "# 欲望\n我要一个 app"); err != nil {
+	if err := ws.WriteDoc(workspace.DocInput, "# 输入\n我要一个 app"); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/api/docs/desire", nil)
-	req.SetPathValue("name", "desire")
+	req := httptest.NewRequest("GET", "/api/docs/input", nil)
+	req.SetPathValue("name", "input")
 	rec := httptest.NewRecorder()
 	h.handleGetDoc(rec, req)
 	if rec.Code != http.StatusOK {
@@ -92,7 +92,7 @@ func TestGetDoc(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp["name"] != "desire" {
+	if resp["name"] != "input" {
 		t.Fatalf("name=%v", resp["name"])
 	}
 	raw, _ := resp["raw"].(string)
@@ -104,8 +104,8 @@ func TestGetDoc(t *testing.T) {
 // TestGetDocNotFound 验证不存在的文档返回 404。
 func TestGetDocNotFound(t *testing.T) {
 	h, _, _ := newTestHandler(t)
-	req := httptest.NewRequest("GET", "/api/docs/need", nil)
-	req.SetPathValue("name", "need")
+	req := httptest.NewRequest("GET", "/api/docs/spec", nil)
+	req.SetPathValue("name", "spec")
 	rec := httptest.NewRecorder()
 	h.handleGetDoc(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -215,8 +215,8 @@ func TestAnswerUnknownAsk(t *testing.T) {
 // TestStateUpdates 验证 agent 事件会更新 /api/state 的状态。
 func TestStateUpdates(t *testing.T) {
 	h, bus, _ := newTestHandler(t)
-	bus.Publish(eventbus.Event{Type: eventbus.EventAgentStart, Agent: "listener"})
-	bus.Publish(eventbus.Event{Type: eventbus.EventAgentDone, Agent: "listener"})
+	bus.Publish(eventbus.Event{Type: eventbus.EventAgentStart, Agent: "analyst"})
+	bus.Publish(eventbus.Event{Type: eventbus.EventAgentDone, Agent: "analyst"})
 	// 给状态监听 goroutine 一点时间处理。
 	time.Sleep(50 * time.Millisecond)
 
@@ -227,14 +227,14 @@ func TestStateUpdates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
-	if st.Stage != "listener" {
+	if st.Stage != "analyst" {
 		t.Fatalf("stage=%s", st.Stage)
 	}
-	if len(st.Agents) != 9 {
+	if len(st.Agents) != 6 {
 		t.Fatalf("agents=%d", len(st.Agents))
 	}
 	if st.Agents[0].Status != "done" {
-		t.Fatalf("listener status=%s", st.Agents[0].Status)
+		t.Fatalf("analyst status=%s", st.Agents[0].Status)
 	}
 }
 
@@ -291,8 +291,8 @@ func TestRegisterRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if len(st.Agents) != 9 {
-		t.Fatalf("agents=%d 期望 9", len(st.Agents))
+	if len(st.Agents) != 6 {
+		t.Fatalf("agents=%d 期望 6", len(st.Agents))
 	}
 
 	// /api/config

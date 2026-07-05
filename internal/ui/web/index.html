@@ -107,7 +107,14 @@
         <!-- 流程步骤 -->
         <div class="col-span-12 md:col-span-4">
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 h-full">
-            <h2 class="font-semibold mb-3 text-gray-900 dark:text-gray-100" x-text="t('flow.title')"></h2>
+            <div class="flex items-center mb-3">
+              <h2 class="font-semibold text-gray-900 dark:text-gray-100" x-text="t('flow.title')"></h2>
+              <span class="ml-auto text-xs px-2 py-0.5 rounded"
+                    :class="currentProject?.status === 'running' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                          : (currentProject?.status === 'paused' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300')"
+                    x-show="currentID" x-text="orchStatusBadge()"></span>
+            </div>
             <ol class="space-y-2" x-show="currentID">
               <template x-for="(a, i) in state.agents" :key="a.stage">
                 <li class="flex items-center gap-2 px-2 py-2 rounded" :class="agentRowClass(a)">
@@ -119,8 +126,23 @@
               </template>
             </ol>
             <div x-show="!currentID" class="text-xs text-gray-400 dark:text-gray-500" x-text="t('flow.selectFirst')"></div>
-            <button x-show="currentID" @click="startOrchestrator()"
-                    class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white text-sm py-2 rounded transition" x-text="t('flow.startOrch')"></button>
+            <!-- 控制按钮：未启动显示 Start，运行中显示 Pause/Stop，暂停中显示 Resume/Stop -->
+            <div x-show="currentID" class="mt-4 space-y-2">
+              <button x-show="!orchState.running" @click="startOrchestrator()"
+                      class="w-full bg-green-600 hover:bg-green-700 text-white text-sm py-2 rounded transition" x-text="t('flow.startOrch')"></button>
+              <div x-show="orchState.running && !orchState.paused" class="grid grid-cols-2 gap-2">
+                <button @click="pauseOrchestrator()"
+                        class="bg-yellow-500 hover:bg-yellow-600 text-white text-sm py-2 rounded transition" x-text="t('flow.pause')"></button>
+                <button @click="stopOrchestrator()"
+                        class="bg-red-500 hover:bg-red-600 text-white text-sm py-2 rounded transition" x-text="t('flow.stop')"></button>
+              </div>
+              <div x-show="orchState.paused" class="grid grid-cols-2 gap-2">
+                <button @click="resumeOrchestrator()"
+                        class="bg-green-600 hover:bg-green-700 text-white text-sm py-2 rounded transition" x-text="t('flow.resume')"></button>
+                <button @click="stopOrchestrator()"
+                        class="bg-red-500 hover:bg-red-600 text-white text-sm py-2 rounded transition" x-text="t('flow.stop')"></button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -129,8 +151,8 @@
           <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 flex flex-col" style="min-height: 24rem;">
             <div class="flex items-center gap-2 mb-3 flex-wrap">
               <h2 class="font-semibold text-gray-900 dark:text-gray-100" x-text="t('doc.viewer')"></h2>
-              <div class="ml-auto flex gap-1">
-                <template x-for="d in ['desire','need','spec','deal','task']" :key="d">
+              <div class="ml-auto flex gap-1 flex-wrap">
+                <template x-for="d in ['input','spec','deal','task','queue','progress','coder','reviewer']" :key="d">
                   <button class="px-2 py-1 text-xs rounded transition"
                           :class="selectedDoc===d ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
                           x-text="d" @click="selectDoc(d)"></button>
@@ -214,6 +236,95 @@
                 <button @click="submitGithub()"
                         class="mt-3 bg-gray-800 hover:bg-black dark:bg-gray-700 dark:hover:bg-gray-600 text-white text-sm py-2 px-4 rounded transition" x-text="t('github.save')"></button>
               </details>
+            </div>
+          </div>
+
+          <!-- 异步需求队列 -->
+          <div class="col-span-12 md:col-span-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 h-full">
+              <h2 class="font-semibold mb-2 text-gray-900 dark:text-gray-100" x-text="t('req.title')"></h2>
+              <textarea x-model="newRequirement" rows="4" :placeholder="t('req.placeholder')"
+                        class="w-full text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded p-2 focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
+              <button @click="submitRequirement()"
+                      class="mt-2 w-full bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 rounded transition" x-text="t('req.submit')"></button>
+              <details class="mt-3">
+                <summary class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer" x-text="t('req.queue')"></summary>
+                <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 rounded p-2"
+                     x-text="reqQueue || t('req.empty')"></pre>
+              </details>
+            </div>
+          </div>
+
+          <!-- 项目级模型覆盖 -->
+          <div class="col-span-12 md:col-span-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4 h-full">
+              <div class="flex items-center mb-2">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100" x-text="t('pm.title')"></h2>
+                <button @click="loadProjectModels()"
+                        class="ml-auto text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" x-text="t('settings.reload')"></button>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3" x-text="t('pm.hint')"></p>
+              <div class="space-y-2">
+                <template x-for="a in agents" :key="a.stage">
+                  <div class="grid grid-cols-12 gap-2 items-center">
+                    <label class="col-span-4 md:col-span-3 text-sm text-gray-700 dark:text-gray-300 font-medium" x-text="a.stage"></label>
+                    <template x-if="availableModels.length > 0">
+                      <select x-model="projectModels[a.stage]"
+                              class="col-span-8 md:col-span-9 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded px-2 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500">
+                        <option value="" x-text="t('pm.inherit') + ' (' + inheritedModel(a.stage) + ')'"></option>
+                        <template x-for="m in availableModels" :key="m">
+                          <option :value="m" x-text="m"></option>
+                        </template>
+                      </select>
+                    </template>
+                    <template x-if="availableModels.length === 0">
+                      <input type="text" x-model="projectModels[a.stage]"
+                             :placeholder="inheritedModel(a.stage)"
+                             class="col-span-8 md:col-span-9 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded px-2 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500">
+                    </template>
+                  </div>
+                </template>
+              </div>
+              <div class="flex items-center mt-4">
+                <span class="text-xs text-green-500" x-show="projectModelsSaved" x-text="t('pm.saved')"></span>
+                <button @click="saveProjectModels()"
+                        class="ml-auto bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 px-5 rounded transition" x-text="t('pm.save')"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 文件浏览 -->
+          <div class="col-span-12">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div class="flex items-center mb-3 flex-wrap gap-2">
+                <h2 class="font-semibold text-gray-900 dark:text-gray-100" x-text="t('files.title')"></h2>
+                <code class="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded" x-text="filesPath"></code>
+                <button @click="loadFiles(filesUpPath())" x-show="filesPath !== '.'"
+                        class="text-xs text-blue-600 dark:text-blue-400 hover:underline">⬆ <span x-text="t('files.up')"></span></button>
+                <button @click="loadFiles(filesPath)"
+                        class="ml-auto text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" x-text="t('files.refresh')"></button>
+                <button x-show="filePreviewName" @click="closeFilePreview()"
+                        class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" x-text="t('files.back')"></button>
+              </div>
+              <!-- 文件预览 -->
+              <div x-show="filePreviewName" class="overflow-auto bg-gray-50 dark:bg-gray-900 rounded p-3" style="max-height: 28rem;">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-2" x-text="filePreviewName"></div>
+                <pre class="whitespace-pre-wrap break-words font-mono text-xs text-gray-800 dark:text-gray-100"
+                     x-text="filePreview"></pre>
+              </div>
+              <!-- 文件列表 -->
+              <div x-show="!filePreviewName" class="overflow-auto" style="max-height: 28rem;">
+                <template x-for="f in filesEntries" :key="f.path">
+                  <div class="flex items-center px-2 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer text-sm"
+                       @click="f.is_dir ? openDir(f.name) : previewFile(f.name)">
+                    <span class="mr-2" x-text="f.is_dir ? '📁' : '📄'"></span>
+                    <span class="text-gray-800 dark:text-gray-100" x-text="f.name"></span>
+                    <span class="ml-auto text-xs text-gray-400 dark:text-gray-500"
+                          x-text="f.is_dir ? '' : (f.size + ' B')"></span>
+                  </div>
+                </template>
+                <div x-show="filesEntries.length===0" class="text-center py-6 text-gray-400 dark:text-gray-500 text-sm" x-text="t('files.empty')"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -494,6 +605,12 @@
           <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1" x-text="t('np.branch')"></label>
           <input type="text" x-model="newProject.branch" :placeholder="t('np.branchPlaceholder')"
                  class="w-full text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1" x-text="t('np.localDir')"></label>
+          <input type="text" x-model="newProject.localDir" :placeholder="t('np.localDirPlaceholder')"
+                 class="w-full text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded px-2 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-1" x-text="t('np.localDirHint')"></p>
         </div>
         <div x-show="ghReposError" class="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded p-2 whitespace-pre-wrap"
              x-text="ghReposError"></div>

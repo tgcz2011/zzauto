@@ -1,18 +1,19 @@
 // Package workspace 定义 zzauto 的项目工作区与文档协议。
 //
-// 文档协议：
-//   - desire.md：Listener 产出的用户原始欲望
-//   - need.md：Asker 澄清后的需求
-//   - spec.md：Planner 规划的规格（Requirements 用 [x]/[ ] 标记完成）
-//   - deal.md：Designer 设计、Evaluator 评估的契约
-//   - task.md：Manager 拆解的任务清单（勾选语法见下方）
+// v0.6.0 架构精简后的文档协议：
+//   - input.md：用户原始需求输入
+//   - spec.md：Analyst 分析后产出的结构化规格（Requirements 用 [x]/[ ] 标记完成）
+//   - deal.md：Architect 设计的完工协议（含批判性分析、验收标准、风险点）
+//   - task.md：Planner 拆解的任务清单
+//   - requirements_queue.md：异步需求队列（用户随时追加的新需求）
+//   - reports/coder.md：Coder 生成代码后的自评报告
+//   - reports/reviewer.md：Reviewer 审查报告
+//   - reports/progress.md：Mixor 进度报告
 //
 // task.md 勾选语法：
 //
 //	- [ ] T1: 任务描述   未完成
 //	- [x] T1: 任务描述   已完成
-//
-// 每项任务拥有唯一 id（如 T1、T2）。
 //
 // spec.md 打勾约定：
 //
@@ -28,17 +29,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 阶段常量
+// 阶段常量（v0.6.0 精简为 5 LLM 角色 + Mixor）
 const (
-	StageListener  = "listener"
-	StageAsker     = "asker"
+	StageAnalyst   = "analyst"
+	StageArchitect = "architect"
 	StagePlanner   = "planner"
-	StageDesigner  = "designer"
-	StageEvaluator = "evaluator"
-	StageManager   = "manager"
-	StageExecutor  = "executor"
-	StageGenerator = "generator"
-	StageGittor    = "gittor"
+	StageCoder     = "coder"
+	StageReviewer  = "reviewer"
+	StageMixor     = "mixor"
 )
 
 // 状态常量
@@ -47,16 +45,25 @@ const (
 	StatusRunning = "running"
 	StatusDone    = "done"
 	StatusFailed  = "failed"
+	StatusPaused  = "paused"
 )
 
 // 文档名称常量
 const (
-	DocDesire = "desire.md"
-	DocNeed   = "need.md"
-	DocSpec   = "spec.md"
-	DocDeal   = "deal.md"
-	DocTask   = "task.md"
+	DocInput      = "input.md"
+	DocSpec       = "spec.md"
+	DocDeal       = "deal.md"
+	DocTask       = "task.md"
+	DocReqQueue   = "requirements_queue.md"
+	DocCoderReport  = "reports/coder.md"
+	DocReviewReport = "reports/reviewer.md"
+	DocProgress     = "reports/progress.md"
 )
+
+// AllStages 返回全部阶段（按编排顺序）。
+func AllStages() []string {
+	return []string{StageAnalyst, StageArchitect, StagePlanner, StageCoder, StageReviewer, StageMixor}
+}
 
 // DocMeta 文档 frontmatter 元信息。
 type DocMeta struct {

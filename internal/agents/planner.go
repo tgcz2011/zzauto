@@ -1,3 +1,7 @@
+// Package agents 中 Planner Agent 的实现。
+//
+// Planner（旧 Manager 重命名）：读取 spec.md + deal.md，调用 AI 拆解为
+// 可执行的 task.md 任务清单。每项任务可独立完成，并引用相关验收点 D1/D2。
 package agents
 
 import (
@@ -11,152 +15,109 @@ import (
 	"github.com/tgcz2011/zzauto/internal/workspace"
 )
 
-// Planner 是规划阶段的 agent：读取 Asker 产出的 need.md，调用 AI
-// 生成符合 schema.go 约定的 spec.md（Why / What Changes / Impact /
-// ADDED Requirements 结构），并写入 workspace。
-//
-// Planner 不与用户交互，仅做一次 AI 调用即可产出完整 spec。
-type Planner struct {
-	model string // 该角色配置的模型，空则用 aicli 默认
-}
+// plannerSystemPrompt 是 Planner 调用 AI 时使用的系统提示词。
+const plannerSystemPrompt = `你是任务规划者。基于 spec 和 deal，拆解为可执行的任务清单 task.md。每项任务格式：- [ ] T1: 任务描述（引用相关验收点 D1/D2）。任务应粒度适中，每个可独立完成。
 
-// NewPlanner 构造一个 Planner 实例。model 为该角色配置的模型名，空串表示用默认。
-func NewPlanner(model string) *Planner { return &Planner{model: model} }
+输出格式（严格遵循以下 Markdown 结构，不要包裹代码块、不要输出 frontmatter）：
 
-// Name 返回 agent 标识，与 workspace 阶段常量 StagePlanner 对应。
-func (p *Planner) Name() string { return "planner" }
-
-// plannerSystemPrompt 是 Planner 调用 AI 时使用的系统提示。
-//
-// 该提示约束 AI 严格按 schema.go 中 spec.md 的结构产出，避免后续
-// Evaluator / Manager 解析失败。
-const plannerSystemPrompt = `你是一名资深的软件需求规划师（Planner）。
-
-你的职责：阅读用户提供的 need.md（需求清单），将其提炼为一份结构化、
-可被下游 Designer / Evaluator / Manager 直接消费的 spec.md。
-
-输出必须严格遵循以下 Markdown 结构（不要输出任何额外说明、不要包裹代码块）：
-
-# <项目名> Spec
-## Why
-<为何要做这件事：业务背景与动机，1-3 句>
-
-## What Changes
-- <变更点 1：用一句话描述要新增/修改/删除的能力>
-- <变更点 2>
-
-## Impact
-<影响范围：涉及哪些模块、接口、数据或用户行为；潜在风险简述>
-
-## ADDED Requirements
-### Requirement: <需求名 1>
-该需求 SHALL <用 SHALL 句式描述系统的强制行为>。
-#### Scenario
-- WHEN <触发条件> THEN <期望结果>
-- WHEN <另一触发条件> THEN <期望结果>
-
-### Requirement: <需求名 2>
-该需求 SHALL <描述>。
-#### Scenario
-- WHEN <条件> THEN <结果>
+# Tasks
+- [ ] T1: <任务描述>（引用 D1/D2）
+- [ ] T2: <任务描述>（引用 D1）
 
 规则：
-1. 项目名从 need.md 内容中提炼（取核心关键词，简洁有意义）。
-2. What Changes 至少 1 个变更点，使用 "- " 列表项。
-3. ADDED Requirements 至少 1 个 Requirement；每个 Requirement 名称在文档内唯一。
-4. 每个 Requirement 必须包含 SHALL 描述与至少一个 #### Scenario，
-   Scenario 使用 "- WHEN ... THEN ..." 句式。
-5. Requirement 标题使用 "### Requirement: <名>"（不要带 [x] 或 [ ] 标记，
-   完成标记由 Evaluator 后续填写）。
-6. 全文使用中文；不要输出 frontmatter，只输出正文。
-7. 不要输出代码块围栏（连续三个反引号），直接输出 Markdown 正文。`
+1. 任务 id 形如 T1/T2...，在文档内唯一且单调递增，从 T1 开始。
+2. 每项格式必须为 "- [ ] Tx: 描述（引用 Dx）"，使用未完成标记 [ ]。
+3. 任务必须覆盖 spec.md 中所有 Requirement，每个 Requirement 至少对应一项任务。
+4. 任务粒度适中：既不过细也不过粗，每个可独立完成。
+5. 任务描述应引用 deal.md 中的验收点（如 D1/D2），便于追溯。
+6. 任务顺序应符合合理的实现依赖关系。
+7. 全文使用中文；不要输出 frontmatter，只输出正文。`
+
+// Planner 任务规划者：基于 spec + deal 拆解为 task.md。
+type Planner struct{}
+
+// NewPlanner 构造一个 Planner 实例。
+func NewPlanner() *Planner { return &Planner{} }
+
+// Name 返回 agent 标识，与 workspace.StagePlanner 对应。
+func (p *Planner) Name() string { return workspace.StagePlanner }
 
 // Run 执行 Planner 的一次完整工作流：
 //  1. 发布 agent_start
-//  2. 读取 need.md；不存在则返回错误
-//  3. 调用 AI 生成 spec.md 正文
-//  4. 用 RenderDoc 加 frontmatter（Stage=planner, Status=done）写入 spec.md
+//  2. 读取 spec.md + deal.md；任一缺失返回错误
+//  3. 拼装上下文，调用 AI 生成 task.md 正文
+//  4. 用 RenderDoc 加 frontmatter 写入 task.md
 //  5. 发布 doc_update 与 agent_done；失败发布 agent_failed
-func (p *Planner) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient, git GittorClient, bus *eventbus.Bus) error {
+func (p *Planner) Run(ctx context.Context, ws *workspace.Workspace, ai AIClient, git GittorClient, bus *eventbus.Bus, resolver ModelResolver) error {
 	// 1. 发布 agent_start
 	publishEvent(bus, eventbus.EventAgentStart, p.Name(), map[string]any{
 		DataKeyStage: workspace.StagePlanner,
 		DataKeyAgent: p.Name(),
 	})
 
-	// 2. 读取 need.md；若不存在返回错误（先发 agent_failed 再返回）
-	needContent, err := ws.ReadDoc(workspace.DocNeed)
+	// 2. 读取 spec.md + deal.md
+	specContent, err := p.readUpstreamDoc(ws, bus, workspace.DocSpec)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			failErr := fmt.Errorf("need.md 不存在")
-			publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{
-				DataKeyStage: workspace.StagePlanner,
-				DataKeyAgent: p.Name(),
-				DataKeyReason: failErr.Error(),
-			})
-			return failErr
-		}
-		failErr := fmt.Errorf("读取 need.md 失败: %w", err)
-		publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{
-			DataKeyStage:  workspace.StagePlanner,
-			DataKeyAgent:  p.Name(),
-			DataKeyReason: failErr.Error(),
-		})
-		return failErr
+		return err
+	}
+	dealContent, err := p.readUpstreamDoc(ws, bus, workspace.DocDeal)
+	if err != nil {
+		return err
 	}
 
-	// 3. 调用 AI 生成 spec.md 正文
-	specBody, _, err := RunWithTracking(ctx, ws, bus, ai, p.Name(), p.model, plannerSystemPrompt, needContent)
+	// 3. 拼装上下文：spec → deal
+	combined := fmt.Sprintf("# spec.md（项目规格）\n%s\n\n# deal.md（完工协议）\n%s", specContent, dealContent)
+	model := ResolveModel(resolver, workspace.StagePlanner)
+	taskBody, _, err := RunWithTracking(ctx, ws, bus, ai, p.Name(), model, plannerSystemPrompt, combined)
 	if err != nil {
-		failErr := fmt.Errorf("调用 AI 生成 spec 失败: %w", err)
-		publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{
-			DataKeyStage:  workspace.StagePlanner,
-			DataKeyAgent:  p.Name(),
-			DataKeyReason: failErr.Error(),
-		})
-		return failErr
+		return p.fail(bus, fmt.Errorf("调用 AI 生成 task 失败: %w", err))
 	}
 
-	// 4. 加 frontmatter 写入 spec.md
-	meta := workspace.DocMeta{
+	// 4. 加 frontmatter 写入 task.md
+	rendered := workspace.RenderDoc(workspace.DocMeta{
 		Stage:     workspace.StagePlanner,
 		Status:    workspace.StatusDone,
 		UpdatedAt: time.Now(),
-	}
-	rendered := workspace.RenderDoc(meta, specBody)
-	if err := ws.WriteDoc(workspace.DocSpec, rendered); err != nil {
-		failErr := fmt.Errorf("写入 spec.md 失败: %w", err)
-		publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{
-			DataKeyStage:  workspace.StagePlanner,
-			DataKeyAgent:  p.Name(),
-			DataKeyReason: failErr.Error(),
-		})
-		return failErr
+	}, taskBody)
+	if err := ws.WriteDoc(workspace.DocTask, rendered); err != nil {
+		return p.fail(bus, fmt.Errorf("写入 task.md 失败: %w", err))
 	}
 
 	// 5. 发布 doc_update 与 agent_done
 	publishEvent(bus, eventbus.EventDocUpdate, p.Name(), map[string]any{
 		DataKeyStage: workspace.StagePlanner,
 		DataKeyAgent: p.Name(),
-		"doc":        workspace.DocSpec,
+		"doc":        workspace.DocTask,
 	})
 	publishEvent(bus, eventbus.EventAgentDone, p.Name(), map[string]any{
 		DataKeyStage: workspace.StagePlanner,
 		DataKeyAgent: p.Name(),
 	})
-
 	return nil
 }
 
-// publishEvent 向总线发布一条事件。bus 为 nil 时安全跳过，
-// 便于在测试或不需事件总线的场景下复用 agent。
-func publishEvent(bus *eventbus.Bus, typ, agent string, data map[string]any) {
-	if bus == nil {
-		return
+// readUpstreamDoc 读取一份上游文档。文件不存在或读取失败时发布 agent_failed
+// 并返回包装后的错误。
+func (p *Planner) readUpstreamDoc(ws *workspace.Workspace, bus *eventbus.Bus, name string) (string, error) {
+	content, err := ws.ReadDoc(name)
+	if err != nil {
+		var failErr error
+		if errors.Is(err, fs.ErrNotExist) {
+			failErr = fmt.Errorf("%s 不存在", name)
+		} else {
+			failErr = fmt.Errorf("读取 %s 失败: %w", name, err)
+		}
+		return "", p.fail(bus, failErr)
 	}
-	bus.Publish(eventbus.Event{
-		Type:  typ,
-		Agent: agent,
-		Data:  data,
+	return content, nil
+}
+
+// fail 发布 agent_failed 事件并返回错误，统一错误出口。
+func (p *Planner) fail(bus *eventbus.Bus, err error) error {
+	publishEvent(bus, eventbus.EventAgentFailed, p.Name(), map[string]any{
+		DataKeyStage:  workspace.StagePlanner,
+		DataKeyAgent:  p.Name(),
+		DataKeyReason: err.Error(),
 	})
+	return err
 }

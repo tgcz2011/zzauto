@@ -41,6 +41,17 @@ func NewProject(rootDir string) *Workspace {
 	return New(rootDir, GenerateProjectID())
 }
 
+// NewFromProjectDir 用显式项目目录创建 workspace。
+// 与 New 不同（New 计算 <rootDir>/projects/<id>），调用方直接提供项目目录。
+// 用于从 projects.Registry 获取的目录（可能指向 LocalDir，不在标准布局下）。
+func NewFromProjectDir(projectDir, projectID string) *Workspace {
+	return &Workspace{
+		rootDir:    projectDir,
+		projectID:  projectID,
+		projectDir: projectDir,
+	}
+}
+
 // GenerateProjectID 生成短 id：日期时间 + 随机 hex。
 func GenerateProjectID() string {
 	now := time.Now().Format("20060102-150405")
@@ -87,12 +98,12 @@ func (w *Workspace) DocPath(name string) string {
 	return filepath.Join(w.projectDir, name)
 }
 
-// WriteDoc 写入文档内容（若项目目录不存在会自动创建）。
+// WriteDoc 写入文档内容（自动创建缺失的父目录，如 agents/coder/）。
 func (w *Workspace) WriteDoc(name, content string) error {
-	if err := os.MkdirAll(w.projectDir, 0o755); err != nil {
-		return fmt.Errorf("创建项目目录失败: %w", err)
-	}
 	path := w.DocPath(name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("写入文档 %s 失败: %w", path, err)
 	}

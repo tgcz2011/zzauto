@@ -1,9 +1,8 @@
 // Package e2e 提供 zzauto 端到端集成测试。
 //
 // 通过 mock AIClient 按调用顺序返回预设响应，配合本地 bare git 仓库，
-// 验证 Listener → Asker → Planner → Designer ↔ Evaluator → Manager →
-// Executor → Generator → Evaluator → Gittor 全流程能正确产出各阶段文档、
-// 代码文件，并将代码提交到 git 仓库。
+// 验证 Analyst → Architect → Planner → Coder ↔ Reviewer → commitAndPush
+// 全流程能正确产出各阶段文档、代码文件，并将代码提交到 git 仓库。
 package e2e
 
 import (
@@ -148,23 +147,18 @@ func assertDocExists(t *testing.T, ws *workspace.Workspace, name string) {
 	}
 }
 
-// TestE2EFullFlow 验证完整编排流程：9 个 agent 依次执行，产出全部文档、
+// TestE2EFullFlow 验证完整编排流程：6 个 agent 依次执行，产出全部文档、
 // 代码文件，并将代码提交到本地 bare git 仓库。
 //
 // mock AI 按调用顺序返回预设响应：
-//  1. Listener → desire.md 正文
-//  2. Asker 提问 → satisfied=true（无需提问，直接结束提问循环）
-//  3. Asker 汇总 → need.md 正文
-//  4. Planner → spec.md 正文（含 ### Requirement: ）
-//  5. Designer → deal.md 正文
-//  6. Evaluator 讨论 → consensus=true（达成共识）
-//  7. Manager → task.md 正文
-//  8. Generator 代码 → ```go:code/main.go 代码块
-//  9. Generator 自评 → 自评文本
-// 10. Evaluator 代码评估 → pass=true（评估通过）
+//  1. Analyst → JSON（questions=[]，spec 含 ### [ ] Requirement:）
+//  2. Architect → deal.md 正文
+//  3. Planner → task.md 正文
+//  4. Coder → 代码块（```go\npath: code/main.go\n...）
+//  5. Reviewer → JSON（passed=true，评估通过）
 //
-// 断言：desire/need/spec/deal/task.md 均生成、code/ 下有代码文件、
-// reports/evaluated/generator.md 存在、spec.md 所有 Requirement 已打勾、
+// 断言：input/spec/deal/task.md 均生成、code/ 下有代码文件、
+// reports/coder.md 与 reports/reviewer.md 存在、spec.md 所有 Requirement 已打勾、
 // bare git 仓库有 feat 提交记录。
 func TestE2EFullFlow(t *testing.T) {
 	if !hasGit() {
@@ -197,39 +191,26 @@ func TestE2EFullFlow(t *testing.T) {
 	setLocalGitConfig(t, ws.Path())
 
 	// 按调用顺序预设 mock AI 响应
-	desireBody := "# 用户需求\n实现一个简单的计算器，支持加减乘除。\n\n" +
-		"# 改进点\n- 支持键盘输入\n- 错误处理与边界情况"
-	needBody := "# 需求清单\n- N1: 实现加减乘除四则运算\n- N2: 支持键盘输入"
-	specBody := "# 计算器 Spec\n## Why\n用户需要一个计算器\n\n" +
-		"## What Changes\n- 新增四则运算\n\n" +
-		"## Impact\n仅影响计算器模块\n\n" +
-		"## ADDED Requirements\n" +
-		"### Requirement: 四则运算\n" +
-		"该需求 SHALL 支持加减乘除。\n" +
-		"#### Scenario\n" +
-		"- WHEN 输入 1+1 THEN 返回 2\n"
+	specJSON := `{"questions":[], "spec": "# 计算器 Spec\n## Why\n用户需要一个计算器\n\n## What Changes\n- 新增四则运算\n\n## Impact\n仅影响计算器模块\n\n## Requirements\n### [ ] Requirement: 四则运算\n该需求 SHALL 支持加减乘除。\n"}`
 	dealBody := "# 完工协议\n交付一个支持四则运算的计算器\n\n" +
-		"## 验收标准\n- [ ] D1: 支持 1+1=2\n"
+		"## 批判性分析\nspec 未明确数据持久化方式\n\n" +
+		"## 验收标准\n- [ ] D1: 支持 1+1=2\n\n" +
+		"## 风险点与缓解\n- 输入校验：使用统一解析\n"
 	taskBody := "# Tasks\n- [ ] T1: 实现计算器（验收点：支持 1+1=2）\n"
-	codeResponse := "```go:code/main.go\npackage main\n\n" +
+	codeResponse := "```go\npath: code/main.go\npackage main\n\n" +
 		"import \"fmt\"\n\n" +
 		"func main() {\n" +
 		"\tfmt.Println(\"1+1=\", 2)\n" +
 		"}\n```"
-	selfReview := "合格，已实现计算器核心功能。"
+	reviewerJSON := `{"passed": true, "issues": [], "suggestions": []}`
 
 	ai := &mockAI{
 		responses: []string{
-			desireBody,                            // 1. Listener 调用
-			`{"questions":[], "satisfied": true}`, // 2. Asker 生成提问
-			needBody,                              // 3. Asker 汇总 need.md
-			specBody,                              // 4. Planner 生成 spec.md
-			dealBody,                              // 5. Designer 生成 deal.md
-			`{"consensus": true, "critique": ""}`, // 6. Evaluator 讨论评估
-			taskBody,                              // 7. Manager 生成 task.md
-			codeResponse,                          // 8. Generator 生成代码
-			selfReview,                            // 9. Generator 自评
-			`{"pass": true, "issues": []}`,        // 10. Evaluator 代码评估
+			specJSON,     // 1. Analyst 分析需求产出 spec.md
+			dealBody,     // 2. Architect 设计 deal.md
+			taskBody,     // 3. Planner 拆解 task.md
+			codeResponse, // 4. Coder 生成代码
+			reviewerJSON, // 5. Reviewer 评估通过
 		},
 	}
 
@@ -244,9 +225,8 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Fatalf("orchestrator.Run 失败: %v", err)
 	}
 
-	// 断言：五份核心文档均已生成
-	assertDocExists(t, ws, workspace.DocDesire)
-	assertDocExists(t, ws, workspace.DocNeed)
+	// 断言：核心文档均已生成
+	assertDocExists(t, ws, workspace.DocInput)
 	assertDocExists(t, ws, workspace.DocSpec)
 	assertDocExists(t, ws, workspace.DocDeal)
 	assertDocExists(t, ws, workspace.DocTask)
@@ -261,16 +241,9 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Error("code/ 目录应包含代码文件")
 	}
 
-	// 断言：reports/evaluated/generator.md 存在（Evaluator 评估通过后移动）
-	evaluatedReport := filepath.Join(ws.ReportsDir(), "evaluated", "generator.md")
-	if _, err := os.Stat(evaluatedReport); err != nil {
-		t.Errorf("reports/evaluated/generator.md 应存在: %v", err)
-	}
-	// 原始 reports/generator.md 应已被移走
-	originalReport := filepath.Join(ws.ReportsDir(), "generator.md")
-	if _, err := os.Stat(originalReport); !os.IsNotExist(err) {
-		t.Errorf("reports/generator.md 应已被移走，但仍存在")
-	}
+	// 断言：reports/coder.md 与 reports/reviewer.md 已生成
+	assertDocExists(t, ws, workspace.DocCoderReport)
+	assertDocExists(t, ws, workspace.DocReviewReport)
 
 	// 断言：spec.md 中所有 Requirement 已打勾（### [x] Requirement:）
 	specContent, err := ws.ReadDoc(workspace.DocSpec)
@@ -281,7 +254,7 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Error("spec.md 应包含 ### [x] Requirement:（已打勾的 Requirement）")
 	}
 	if strings.Contains(specContent, agents.SpecRequirementPrefix) {
-		t.Error("spec.md 不应再包含未打勾的 ### Requirement: ")
+		t.Error("spec.md 不应再包含未打勾的 ### [ ] Requirement: ")
 	}
 
 	// 断言：bare git 仓库中有 feat 提交记录
