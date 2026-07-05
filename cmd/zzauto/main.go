@@ -21,7 +21,7 @@ import (
 )
 
 // Version zzauto 版本号。
-const Version = "v0.4.0"
+const Version = "v0.5.0"
 
 func main() {
 	log.SetFlags(0)

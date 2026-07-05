@@ -11,8 +11,252 @@
 // 兼容性：保留所有 v0.2.0 路由（/api/state、/api/docs/{name}、/api/asks、
 // /api/ask/{id}、/api/input、/api/config、/api/github、/api/events），
 // 它们按后端当前选中项目工作。
+const I18N = {
+  zh: {
+    'app.title': 'zzauto',
+    'nav.projects': '项目',
+    'nav.settings': '设置',
+    'nav.stats': '统计',
+    'nav.tasks': '任务面板',
+    'project.current': '当前项目',
+    'project.none': '未选择',
+    'project.stage': '阶段',
+    'projects.title': '项目列表',
+    'projects.new': '新建项目',
+    'projects.col.name': '名称',
+    'projects.col.repo': '仓库',
+    'projects.col.status': '状态',
+    'projects.col.created': '创建',
+    'projects.col.actions': '操作',
+    'projects.empty': '暂无项目',
+    'projects.createFirst': '新建第一个项目',
+    'projects.delete': '删除',
+    'flow.title': '流程步骤',
+    'flow.selectFirst': '请先选择或创建项目',
+    'flow.startOrch': '启动编排',
+    'doc.viewer': '文档查看器',
+    'doc.empty': '暂无内容',
+    'doc.selectProject': '请先选择项目',
+    'doc.stage': '阶段',
+    'doc.status': '状态',
+    'doc.updated': '更新',
+    'input.title': '提交需求',
+    'input.placeholder': '描述你想要构建的应用...',
+    'input.submit': '提交',
+    'ask.title': '待回答问题',
+    'ask.placeholder': '输入回答...',
+    'ask.answer': '回答',
+    'ask.empty': '暂无待答问题',
+    'github.title': 'GitHub 配置覆盖（可选）',
+    'github.hint': '默认由 gh CLI 管理 GitHub 鉴权；以下字段仅在需要覆盖远端或分支时填写。',
+    'github.remote': 'Remote',
+    'github.branch': 'Branch',
+    'github.token': 'Token（可选 override）',
+    'github.save': '保存',
+    'settings.title': '角色模型设置',
+    'settings.reload': '重新加载',
+    'settings.hint': '为每个 agent 角色配置独立模型（覆盖默认模型）。留空则使用 aiclibridge 默认模型',
+    'settings.default': '默认（使用 aiclibridge 默认模型）',
+    'settings.saved': '已保存 ✓',
+    'settings.save': '保存',
+    'stats.title': '统计面板',
+    'stats.refresh': '刷新',
+    'stats.autoRefresh': '自动刷新（10s）',
+    'stats.totalReq': '总请求数',
+    'stats.totalToken': '总 Token',
+    'stats.totalUSD': '总 USD',
+    'stats.concurrency': '并发',
+    'stats.activeQueuedMax': 'active / queued / max',
+    'stats.modelDist': '模型分布',
+    'stats.models': '个模型',
+    'stats.col.model': '模型',
+    'stats.col.prompt': 'prompt_tokens',
+    'stats.col.completion': 'completion_tokens',
+    'stats.col.total': 'total_tokens',
+    'stats.col.requests': 'requests',
+    'stats.col.usd': 'USD',
+    'stats.noData': '暂无数据',
+    'tasks.title': '任务面板',
+    'tasks.selectProject': '请先选择项目',
+    'tasks.runs': 'Runs',
+    'tasks.refresh': '刷新',
+    'tasks.noRun': '暂无 run',
+    'tasks.timeline': '事件时间线',
+    'tasks.selectRun': '选择左侧 run 查看事件',
+    'tasks.noEvents': '暂无事件',
+    'tasks.expand': '展开',
+    'tasks.collapse': '收起',
+    'logs.title': '实时日志',
+    'logs.count': '条',
+    'logs.clear': '清空',
+    'logs.waiting': '等待事件...',
+    'np.title': '新建项目',
+    'np.name': '名称 *',
+    'np.namePlaceholder': '项目名称',
+    'np.repo': '仓库',
+    'np.repoPlaceholder': 'owner/name',
+    'np.repoManual': '（手动输入或选择）',
+    'np.branch': '分支',
+    'np.branchPlaceholder': 'main',
+    'np.cancel': '取消',
+    'np.create': '创建',
+    'np.ghNotLoggedIn': 'GitHub CLI 未登录，请运行：\n  gh auth login',
+    'st.pending': '待执行',
+    'st.running': '运行中',
+    'st.done': '完成',
+    'st.failed': '失败',
+    'msg.confirmDelete': '确认删除该项目？该操作不可恢复。',
+    'msg.nameRequired': '请填写项目名称',
+    'msg.createFailed': '创建失败: ',
+    'msg.deleteFailed': '删除失败: ',
+    'msg.startFailed': '启动失败: ',
+    'msg.orchRunning': '该项目已有运行中的编排器',
+    'msg.selectProject': '请先选择项目',
+    'msg.submitFailed': '提交失败: ',
+    'msg.saveFailed': '保存失败: ',
+    'lang.label': '语言',
+    'theme.label': '主题',
+    'theme.toggleLight': '切换到浅色',
+    'theme.toggleDark': '切换到深色',
+  },
+  en: {
+    'app.title': 'zzauto',
+    'nav.projects': 'Projects',
+    'nav.settings': 'Settings',
+    'nav.stats': 'Stats',
+    'nav.tasks': 'Tasks',
+    'project.current': 'Current',
+    'project.none': 'None',
+    'project.stage': 'Stage',
+    'projects.title': 'Projects',
+    'projects.new': 'New Project',
+    'projects.col.name': 'Name',
+    'projects.col.repo': 'Repo',
+    'projects.col.status': 'Status',
+    'projects.col.created': 'Created',
+    'projects.col.actions': 'Actions',
+    'projects.empty': 'No projects',
+    'projects.createFirst': 'Create your first project',
+    'projects.delete': 'Delete',
+    'flow.title': 'Workflow Steps',
+    'flow.selectFirst': 'Please select or create a project first',
+    'flow.startOrch': 'Start Orchestration',
+    'doc.viewer': 'Document Viewer',
+    'doc.empty': 'No content',
+    'doc.selectProject': 'Please select a project first',
+    'doc.stage': 'Stage',
+    'doc.status': 'Status',
+    'doc.updated': 'Updated',
+    'input.title': 'Submit Request',
+    'input.placeholder': 'Describe the app you want to build...',
+    'input.submit': 'Submit',
+    'ask.title': 'Pending Questions',
+    'ask.placeholder': 'Enter answer...',
+    'ask.answer': 'Answer',
+    'ask.empty': 'No pending questions',
+    'github.title': 'GitHub Config Override (optional)',
+    'github.hint': 'GitHub auth is managed by gh CLI by default; fill these fields only when overriding remote or branch.',
+    'github.remote': 'Remote',
+    'github.branch': 'Branch',
+    'github.token': 'Token (optional override)',
+    'github.save': 'Save',
+    'settings.title': 'Role Model Settings',
+    'settings.reload': 'Reload',
+    'settings.hint': 'Configure an independent model for each agent role (overrides default). Leave empty to use the aiclibridge default model',
+    'settings.default': 'Default (use aiclibridge default)',
+    'settings.saved': 'Saved ✓',
+    'settings.save': 'Save',
+    'stats.title': 'Statistics',
+    'stats.refresh': 'Refresh',
+    'stats.autoRefresh': 'Auto refresh (10s)',
+    'stats.totalReq': 'Total Requests',
+    'stats.totalToken': 'Total Tokens',
+    'stats.totalUSD': 'Total USD',
+    'stats.concurrency': 'Concurrency',
+    'stats.activeQueuedMax': 'active / queued / max',
+    'stats.modelDist': 'Model Distribution',
+    'stats.models': 'models',
+    'stats.col.model': 'Model',
+    'stats.col.prompt': 'prompt_tokens',
+    'stats.col.completion': 'completion_tokens',
+    'stats.col.total': 'total_tokens',
+    'stats.col.requests': 'requests',
+    'stats.col.usd': 'USD',
+    'stats.noData': 'No data',
+    'tasks.title': 'Task Panel',
+    'tasks.selectProject': 'Please select a project first',
+    'tasks.runs': 'Runs',
+    'tasks.refresh': 'Refresh',
+    'tasks.noRun': 'No runs',
+    'tasks.timeline': 'Event Timeline',
+    'tasks.selectRun': 'Select a run on the left to view events',
+    'tasks.noEvents': 'No events',
+    'tasks.expand': 'Expand',
+    'tasks.collapse': 'Collapse',
+    'logs.title': 'Live Logs',
+    'logs.count': 'entries',
+    'logs.clear': 'Clear',
+    'logs.waiting': 'Waiting for events...',
+    'np.title': 'New Project',
+    'np.name': 'Name *',
+    'np.namePlaceholder': 'Project name',
+    'np.repo': 'Repository',
+    'np.repoPlaceholder': 'owner/name',
+    'np.repoManual': '(manual input or select)',
+    'np.branch': 'Branch',
+    'np.branchPlaceholder': 'main',
+    'np.cancel': 'Cancel',
+    'np.create': 'Create',
+    'np.ghNotLoggedIn': 'GitHub CLI not logged in, please run:\n  gh auth login',
+    'st.pending': 'Pending',
+    'st.running': 'Running',
+    'st.done': 'Done',
+    'st.failed': 'Failed',
+    'msg.confirmDelete': 'Are you sure you want to delete this project? This action cannot be undone.',
+    'msg.nameRequired': 'Please enter a project name',
+    'msg.createFailed': 'Create failed: ',
+    'msg.deleteFailed': 'Delete failed: ',
+    'msg.startFailed': 'Start failed: ',
+    'msg.orchRunning': 'An orchestrator is already running for this project',
+    'msg.selectProject': 'Please select a project first',
+    'msg.submitFailed': 'Submit failed: ',
+    'msg.saveFailed': 'Save failed: ',
+    'lang.label': 'Language',
+    'theme.label': 'Theme',
+    'theme.toggleLight': 'Switch to light',
+    'theme.toggleDark': 'Switch to dark',
+  }
+};
+
 function appData() {
   return {
+    // ---- i18n & 主题 ----
+    lang: localStorage.getItem('zzauto-lang') || 'zh',
+    theme: localStorage.getItem('zzauto-theme') || 'light',
+
+    t(key) {
+      return ((I18N[this.lang] || I18N.zh)[key]) || key;
+    },
+
+    setLang(l) {
+      this.lang = l;
+      localStorage.setItem('zzauto-lang', l);
+    },
+
+    toggleTheme() {
+      this.theme = this.theme === 'light' ? 'dark' : 'light';
+      localStorage.setItem('zzauto-theme', this.theme);
+      this.applyTheme();
+    },
+
+    applyTheme() {
+      if (this.theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    },
+
     // ---- 全局 ----
     page: 'projects',
     agents: [
@@ -68,6 +312,7 @@ function appData() {
 
     // ====== 生命周期 ======
     async init() {
+      this.applyTheme();
       this.connectSSE();
       await this.loadProjects();
       await this.loadModels();
@@ -142,7 +387,7 @@ function appData() {
     async createProject() {
       const np = this.newProject;
       if (!np.name || !np.name.trim()) {
-        alert('请填写项目名称');
+        alert(this.t('msg.nameRequired'));
         return;
       }
       try {
@@ -166,15 +411,15 @@ function appData() {
           }
         } else {
           const j = await r.json().catch(() => ({}));
-          alert('创建失败: ' + (j.error || r.status));
+          alert(this.t('msg.createFailed') + (j.error || r.status));
         }
       } catch (e) {
-        alert('创建失败: ' + e.message);
+        alert(this.t('msg.createFailed') + e.message);
       }
     },
 
     async deleteProject(id) {
-      if (!confirm('确认删除该项目？该操作不可恢复。')) return;
+      if (!confirm(this.t('msg.confirmDelete'))) return;
       try {
         const r = await fetch('/api/projects/' + encodeURIComponent(id), { method: 'DELETE' });
         if (r.ok) {
@@ -190,10 +435,10 @@ function appData() {
           await this.loadProjects();
         } else {
           const j = await r.json().catch(() => ({}));
-          alert('删除失败: ' + (j.error || r.status));
+          alert(this.t('msg.deleteFailed') + (j.error || r.status));
         }
       } catch (e) {
-        alert('删除失败: ' + e.message);
+        alert(this.t('msg.deleteFailed') + e.message);
       }
     },
 
@@ -219,7 +464,7 @@ function appData() {
           this.ghRepos = j.repos || [];
         } else if (r.status === 401) {
           const j = await r.json().catch(() => ({}));
-          this.ghReposError = j.login_hint || 'GitHub CLI 未登录，请运行：\n  gh auth login';
+          this.ghReposError = j.login_hint || this.t('np.ghNotLoggedIn');
         } else {
           const j = await r.json().catch(() => ({}));
           this.ghReposError = j.error || ('拉取仓库失败: ' + r.status);
@@ -239,13 +484,13 @@ function appData() {
         if (r.ok) {
           this.fetchState();
         } else if (r.status === 409) {
-          alert('该项目已有运行中的编排器');
+          alert(this.t('msg.orchRunning'));
         } else {
           const j = await r.json().catch(() => ({}));
-          alert('启动失败: ' + (j.error || r.status));
+          alert(this.t('msg.startFailed') + (j.error || r.status));
         }
       } catch (e) {
-        alert('启动失败: ' + e.message);
+        alert(this.t('msg.startFailed') + e.message);
       }
     },
 
@@ -253,7 +498,7 @@ function appData() {
     async submitInput() {
       if (!this.inputRequest.trim()) return;
       if (!this.currentID) {
-        alert('请先选择项目');
+        alert(this.t('msg.selectProject'));
         return;
       }
       try {
@@ -268,7 +513,7 @@ function appData() {
           this.fetchDoc('desire');
         } else {
           const j = await r.json().catch(() => ({}));
-          alert('提交失败: ' + (j.error || r.status));
+          alert(this.t('msg.submitFailed') + (j.error || r.status));
         }
       } catch (e) { /* 忽略 */ }
     },
@@ -382,10 +627,10 @@ function appData() {
           setTimeout(() => { this.settingsSaved = false; }, 2000);
         } else {
           const j = await r.json().catch(() => ({}));
-          alert('保存失败: ' + (j.error || r.status));
+          alert(this.t('msg.saveFailed') + (j.error || r.status));
         }
       } catch (e) {
-        alert('保存失败: ' + e.message);
+        alert(this.t('msg.saveFailed') + e.message);
       }
     },
 
@@ -559,7 +804,8 @@ function appData() {
       return 'bg-gray-300 text-gray-600';
     },
     statusLabel(s) {
-      return { pending: '待执行', running: '运行中', done: '完成', failed: '失败' }[s] || s;
+      const map = { pending: this.t('st.pending'), running: this.t('st.running'), done: this.t('st.done'), failed: this.t('st.failed') };
+      return map[s] || s;
     },
     eventClass(ev) {
       const t = ev.event_type || ev.type;

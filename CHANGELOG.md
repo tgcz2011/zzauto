@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-07-05
+### Added
+- UI 多语言切换（中英文）：所有界面文本走 i18n 字典，顶部语言切换按钮，偏好持久化到 localStorage
+- UI 深浅色主题切换：Tailwind darkMode: 'class'，顶部 🌙/☀️ 切换按钮，全区块 dark: 前缀适配，偏好持久化到 localStorage
+- Settings 页模型配置改为 select 下拉选择（来自 /api/aicli/models），不再手动输入模型名；列表为空时退化为 input
+
+### Changed
+- 前端 index.html/app.js/style.css 全面 i18n 化与暗色主题适配（3 文件）
+- app.js 新增 I18N 全局字典（zh/en 双语）+ lang/theme 状态 + t()/setLang()/toggleTheme()/applyTheme() 方法
+- app.js 所有 alert/confirm 文本改用 t('msg.*') 国际化
+- index.html 顶部导航栏新增语言切换 + 主题切换按钮
+- style.css 新增暗色模式渐变遮罩与滚动条样式
+- Version v0.4.0 → v0.5.0
+
 ## [v0.4.0] - 2026-07-04
 ### Added
 - zzauto daemon 化：新增 start/stop/restart/status 子命令；fork 子进程脱离终端（Unix setsid / Windows CREATE_NEW_PROCESS_GROUP），PID 文件管理 ~/.zzauto/zzauto.pid，日志 ~/.zzauto/zzauto.log

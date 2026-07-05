@@ -42,3 +42,13 @@ pre.max-h-6::after {
   pointer-events: none;
   background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.6));
 }
+
+/* 暗色模式：思考事件折叠态渐变遮罩用深色，避免白底突兀 */
+.dark pre.max-h-6::after {
+  background: linear-gradient(to bottom, transparent, rgba(17, 24, 39, 0.6));
+}
+
+/* 暗色模式：滚动条颜色调整为浅色半透明，提升可辨识度 */
+.dark .overflow-auto::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
